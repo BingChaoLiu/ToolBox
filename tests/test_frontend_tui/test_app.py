@@ -83,10 +83,10 @@ class TestScriptMenuIdMapping:
         assert name == "崩溃分析流水线"
 
 
-class TestModeSwitching:
-    """测试模式切换逻辑（不启动 Textual app）。"""
+class TestInitialState:
+    """测试 App 初始状态（不启动 Textual app）。"""
 
-    def test_initial_mode_is_welcome(self):
+    def test_initial_state(self):
         from toolbox.frontend_tui.app import ToolBoxTUI
         from toolbox.core import ToolboxCore
         core = ToolboxCore.__new__(ToolboxCore)
@@ -98,9 +98,12 @@ class TestModeSwitching:
         core._current_pipeline_engine = None
 
         app = ToolBoxTUI(core)
-        assert app._mode == "welcome"
+        assert app._is_busy is False
+        assert len(app._active_tasks) == 0
+        assert app._current_type is None
+        assert app._current_meta is None
 
-    def test_show_form_sets_mode(self):
+    def test_manual_state_assignment(self):
         from toolbox.frontend_tui.app import ToolBoxTUI
         from toolbox.core import ToolboxCore
         core = ToolboxCore.__new__(ToolboxCore)
@@ -115,7 +118,6 @@ class TestModeSwitching:
         script = _make_script("test", params=[
             ParamDef(name="msg", label="消息", type="text"),
         ])
-        # _show_form 需要实际 widget，只验证模式设定
         app._current_type = "script"
         app._current_meta = script
         assert app._current_type == "script"

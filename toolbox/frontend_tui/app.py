@@ -16,7 +16,6 @@ from textual.widgets import (
     ListItem,
     Label,
     Input,
-    Button,
     Select,
     Checkbox,
 )
@@ -28,9 +27,72 @@ from toolbox.core.events import (
 from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
 
+_next_widget_id = 0
+
+
+def _fresh_id(prefix="w"):
+    global _next_widget_id
+    _next_widget_id += 1
+    return f"{prefix}-{_next_widget_id}"
+
+
+_STATUS_ICONS = {
+    "running": "●",
+    "completed": "✔",
+    "failed": "✘",
+    "cancelled": "⊘",
+}
+
+
+class ExecutionRecord:
+    def __init__(self, tid: int, name: str):
+        self.tid = tid
+        self.name = name
+        self.timestamp = datetime.now()
+        self.lines: list[str] = []
+        self.status = "running"
+        self.item_widget: HistoryItem | None = None
+
+    def add_line(self, line: str):
+        self.lines.append(line)
+
+    def get_text(self) -> str:
+        return "\n".join(self.lines[-500:])
+
+    def get_line_count(self) -> int:
+        return len(self.lines)
+
+    def export(self, path: str):
+        Path(path).write_text("\n".join(self.lines), encoding="utf-8")
+
+
+class HistoryItem(Static):
+    def __init__(self, record: ExecutionRecord):
+        self._record_tid = record.tid
+        super().__init__(self._fmt(record), classes=f"history-item status-{record.status}")
+
+    @staticmethod
+    def _fmt(record: ExecutionRecord) -> str:
+        icon = _STATUS_ICONS.get(record.status, "?")
+        time_str = record.timestamp.strftime("%H:%M:%S")
+        return f"{icon} {time_str}\n  {record.name}"
+
+    def refresh_display(self, record: ExecutionRecord):
+        self.update(self._fmt(record))
+        for cls in list(self.classes):
+            if cls.startswith("status-"):
+                self.remove_class(cls)
+        self.add_class(f"status-{record.status}")
+
+    def on_click(self):
+        app = self.app
+        if isinstance(app, ToolBoxTUI):
+            app._select_record(self._record_tid)
+
 
 class ScriptMenu(ListView):
-    def __init__(self, scripts, pipelines):
+    def __init__(self, scripts, pipelines, on_select=None):
+        self._on_select = on_select
         items = []
         self._id_map: dict[str, tuple[str, str]] = {}
         categories: dict[str, list] = {}
@@ -59,36 +121,16 @@ class ScriptMenu(ListView):
         self._scripts = {s.name: s for s in scripts}
         self._pipelines = {p.name: p for p in pipelines}
 
-
-class OutputPanel(Static):
-    def __init__(self):
-        super().__init__(id="output-panel")
-        self._output_lines: list[str] = []
-        self._auto_scroll = True
-
-    def clear_output(self):
-        self._output_lines = []
-
-    def write_line(self, line: str):
-        self._output_lines.append(line)
-        if self._auto_scroll:
-            self._render_output()
-
-    def _render_output(self):
-        content = "\n".join(self._output_lines[-500:])
-        self.update(content)
-
-    def get_output_text(self) -> str:
-        return "\n".join(self._output_lines)
-
-    def export_log(self, path: str):
-        Path(path).write_text(
-            "\n".join(self._output_lines),
-            encoding="utf-8",
-        )
-
-    def get_line_count(self) -> int:
-        return len(self._output_lines)
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if self._on_select is None:
+            return
+        item = event.item
+        item_id = item.id
+        if not item_id:
+            return
+        entry = self._id_map.get(item_id)
+        if entry:
+            self._on_select(entry[0], entry[1])
 
 
 class ToolBoxTUI(App):
@@ -119,15 +161,52 @@ class ToolBoxTUI(App):
     }
 
     #output-panel {
-        height: 1fr;
+        height: auto;
         padding: 0 1;
-        overflow-y: auto;
     }
 
-    #choice-input {
-        dock: bottom;
-        height: 3;
-        margin: 0 1;
+    #history-panel {
+        width: 30;
+        border-left: solid green;
+        background: $surface;
+        padding: 1 0;
+    }
+
+    #history-title {
+        text-style: bold;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+
+    .history-item {
+        padding: 0 1;
+        height: auto;
+        border-bottom: dashed $border;
+    }
+
+    .history-item:hover {
+        text-style: bold;
+        background: $surface-darken-1;
+    }
+
+    .history-item.selected {
+        background: $primary-darken-3;
+    }
+
+    .status-running {
+        color: $warning;
+    }
+
+    .status-completed {
+        color: $success;
+    }
+
+    .status-failed {
+        color: $error;
+    }
+
+    .status-cancelled {
+        color: $text-muted;
     }
 
     .form-title {
@@ -144,8 +223,18 @@ class ToolBoxTUI(App):
         margin-bottom: 1;
     }
 
+    .form-hint {
+        color: $text-muted;
+    }
+
     .hidden {
         display: none;
+    }
+
+    .choice-input {
+        dock: bottom;
+        height: 3;
+        margin: 0 1;
     }
     """
 
@@ -153,6 +242,7 @@ class ToolBoxTUI(App):
         Binding("f5", "refresh_menu", "刷新菜单"),
         Binding("f9", "execute", "执行"),
         Binding("f11", "toggle_fullscreen", "全屏输出"),
+        Binding("f12", "toggle_history", "执行记录"),
         Binding("ctrl+s", "export_log", "导出日志"),
         Binding("ctrl+c", "cancel_execution", "中止"),
         Binding("slash", "input_choice", "输入选项"),
@@ -163,10 +253,18 @@ class ToolBoxTUI(App):
         self.core = core
         self._current_meta = None
         self._current_type = None
-        self._running = False
         self._last_prompt_step_id = None
         self._last_prompt_choices: list[str] = []
-        self._mode = "welcome"  # welcome | form | output
+        self._choice_input = None
+        self._param_widget_ids: dict[str, str] = {}
+        self._active_tasks: dict[int, tuple[str, asyncio.Task]] = {}
+        self._task_seq = 0
+        self._records: dict[int, ExecutionRecord] = {}
+        self._current_view_tid: int | None = None
+
+    @property
+    def _is_busy(self):
+        return any(not t.done() for _, t in self._active_tasks.values())
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -175,148 +273,85 @@ class ToolBoxTUI(App):
                 yield ScriptMenu(
                     self.core.list_scripts(),
                     self.core.list_pipelines(),
+                    on_select=self._on_menu_select,
                 )
             with Vertical(id="main-area"):
                 with VerticalScroll(id="form-container"):
-                    pass
-                with Vertical(id="output-container", classes="hidden"):
-                    yield OutputPanel()
+                    yield Static(
+                        "欢迎使用 ToolBox\n\n"
+                        "选择左侧脚本或流水线开始操作\n\n"
+                        "F5 刷新 | F9 执行 | F11 全屏\n"
+                        "F12 执行记录",
+                        classes="form-title",
+                    )
+                with VerticalScroll(id="output-container", classes="hidden"):
+                    yield Static(id="output-panel")
+            with VerticalScroll(id="history-panel", classes="hidden"):
+                yield Static("执行记录", id="history-title")
         yield Footer()
 
-    def on_mount(self):
-        self._show_welcome()
+    # ── Menu & form ──────────────────────────────────────────────
 
-    def _show_welcome(self):
-        self._mode = "welcome"
+    def _on_menu_select(self, item_type: str, name: str):
+        if item_type == "script":
+            script = next((s for s in self.core.list_scripts() if s.name == name), None)
+            if script:
+                self._show_form(script)
+        elif item_type == "pipeline":
+            pipeline = next((p for p in self.core.list_pipelines() if p.name == name), None)
+            if pipeline:
+                self._current_type = "pipeline"
+                self._current_meta = pipeline
+                self._show_pipeline_info(pipeline)
+
+    def _clear_form(self):
         fc = self.query_one("#form-container")
-        oc = self.query_one("#output-container")
-        fc.remove_class("hidden")
-        oc.add_class("hidden")
-        fc.query("Static, Input, Select, Checkbox, Button").remove()
-        fc.mount(Static(
-            "欢迎使用 ToolBox\n\n"
-            "选择左侧脚本或流水线开始操作\n\n"
-            "快捷键：\n"
-            "  F5  刷新菜单\n"
-            "  F9  执行\n"
-            "  F11 全屏输出\n"
-            "  Ctrl+S 导出日志\n"
-            "  / 输入选项（流水线交互时）",
-            classes="form-title",
-        ))
+        for child in list(fc.children):
+            child.remove()
 
     def _show_form(self, script: ScriptMeta):
-        self._mode = "form"
         self._current_type = "script"
         self._current_meta = script
+        self._clear_form()
+        self._param_widget_ids = {}
         fc = self.query_one("#form-container")
         oc = self.query_one("#output-container")
         fc.remove_class("hidden")
         oc.add_class("hidden")
 
-        fc.query("Static, Input, Select, Checkbox, Button").remove()
-
         fc.mount(Static(script.name, classes="form-title"))
-
         if script.description:
             fc.mount(Static(script.description))
 
         if not script.params:
-            fc.mount(Static("无参数，直接按 F9 执行", classes="form-hint"))
+            fc.mount(Static("无参数，按 F9 执行", classes="form-hint"))
         else:
             for p in script.params:
-                fc.mount(Static(f"{p.label} ({p.type}){'  [剪贴板]' if p.clipboard else ''}", classes="form-label"))
+                clip = "  [剪贴板]" if p.clipboard else ""
+                fc.mount(Static(f"{p.label} ({p.type}){clip}", classes="form-label"))
+                wid = _fresh_id("p")
+                self._param_widget_ids[p.name] = wid
                 if p.type == "choice" and p.options:
                     opts = [(str(o), str(o)) for o in p.options]
-                    fc.mount(Select(opts, id=f"param-{p.name}", classes="form-input"))
+                    fc.mount(Select(opts, id=wid, classes="form-input"))
                 elif p.type == "flag":
-                    fc.mount(Checkbox(p.label, id=f"param-{p.name}", classes="form-input",
+                    fc.mount(Checkbox(p.label, id=wid, classes="form-input",
                                        value=bool(p.default) if p.default is not None else False))
                 else:
-                    placeholder = f"默认: {p.default}" if p.default is not None else ""
                     fc.mount(Input(
-                        id=f"param-{p.name}",
-                        classes="form-input",
-                        placeholder=placeholder,
+                        id=wid, classes="form-input",
+                        placeholder=f"默认: {p.default}" if p.default is not None else "",
                         value=str(p.default) if p.default is not None else "",
                     ))
 
         fc.mount(Static("\n按 F9 执行", classes="form-hint"))
 
-    def _show_output(self):
-        self._mode = "output"
-        fc = self.query_one("#form-container")
-        oc = self.query_one("#output-container")
-        fc.add_class("hidden")
-        oc.remove_class("hidden")
-        output = self.query_one(OutputPanel)
-        output.clear_output()
-
-    def _collect_params(self, script: ScriptMeta) -> dict:
-        params = {}
-        for p in script.params:
-            input_id = f"param-{p.name}"
-            try:
-                widget = self.query_one(f"#{input_id}")
-            except Exception:
-                if p.default is not None:
-                    params[p.name] = p.default
-                continue
-
-            if isinstance(widget, Input):
-                val = widget.value.strip()
-                if val:
-                    params[p.name] = val
-                elif p.default is not None:
-                    params[p.name] = p.default
-            elif isinstance(widget, Select):
-                val = widget.value
-                if val is not None:
-                    params[p.name] = val
-                elif p.default is not None:
-                    params[p.name] = p.default
-            elif isinstance(widget, Checkbox):
-                params[p.name] = widget.value
-            else:
-                if p.default is not None:
-                    params[p.name] = p.default
-        return params
-
-    def on_list_view_selected(self, event: ListView.Selected):
-        item = event.item
-        item_id = item.id
-        if not item_id:
-            return
-        if self._running:
-            return
-
-        menu = self.query_one(ScriptMenu)
-        entry = menu._id_map.get(item_id)
-        if not entry:
-            return
-
-        item_type, name = entry
-
-        if item_type == "script":
-            script = next((s for s in self.core.list_scripts() if s.name == name), None)
-            if script:
-                self._show_form(script)
-
-        elif item_type == "pipeline":
-            self._current_type = "pipeline"
-            pipeline = next((p for p in self.core.list_pipelines() if p.name == name), None)
-            if pipeline:
-                self._current_meta = pipeline
-                self._show_pipeline_info(pipeline)
-
     def _show_pipeline_info(self, pipeline):
-        self._mode = "form"
+        self._clear_form()
         fc = self.query_one("#form-container")
         oc = self.query_one("#output-container")
         fc.remove_class("hidden")
         oc.add_class("hidden")
-
-        fc.query("Static, Input, Select, Checkbox, Button").remove()
 
         lines = [pipeline.name, ""]
         if pipeline.description:
@@ -324,95 +359,194 @@ class ToolBoxTUI(App):
         lines.append("")
         for s in pipeline.steps:
             if "script" in s:
-                lines.append(f"  → {s.get('script', '?')}")
+                lines.append(f"  -> {s.get('script', '?')}")
             elif "type" in s:
-                lines.append(f"  ◆ {s['type']}")
+                lines.append(f"  * {s['type']}")
         lines.append("")
         lines.append("按 F9 执行")
         fc.mount(Static("\n".join(lines)))
+
+    def _collect_params(self, script: ScriptMeta) -> dict:
+        params = {}
+        for p in script.params:
+            wid = self._param_widget_ids.get(p.name)
+            if not wid:
+                if p.default is not None:
+                    params[p.name] = p.default
+                continue
+            try:
+                widget = self.query_one(f"#{wid}")
+            except Exception:
+                if p.default is not None:
+                    params[p.name] = p.default
+                continue
+
+            if isinstance(widget, Input):
+                val = widget.value.strip()
+                params[p.name] = val if val else (p.default if p.default is not None else val)
+            elif isinstance(widget, Select):
+                val = widget.value
+                params[p.name] = val if val is not None else p.default
+            elif isinstance(widget, Checkbox):
+                params[p.name] = widget.value
+            else:
+                params[p.name] = p.default
+        return params
+
+    # ── Output display ───────────────────────────────────────────
+
+    def _show_output(self):
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.add_class("hidden")
+        oc.remove_class("hidden")
+
+    def _select_record(self, tid: int):
+        record = self._records.get(tid)
+        if not record:
+            return
+        self._current_view_tid = tid
+        self._show_output()
+
+        self.query_one("#output-panel").update(record.get_text())
+
+        panel = self.query_one("#history-panel")
+        for child in panel.children:
+            if isinstance(child, HistoryItem):
+                if child._record_tid == tid:
+                    child.add_class("selected")
+                else:
+                    child.remove_class("selected")
+
+        if record.status == "running":
+            try:
+                self.query_one("#output-container").scroll_end(animate=False)
+            except Exception:
+                pass
+
+    def _update_output_if_viewing(self, tid: int, record: ExecutionRecord):
+        if self._current_view_tid != tid:
+            return
+        self.query_one("#output-panel").update(record.get_text())
+        if record.status == "running":
+            try:
+                self.query_one("#output-container").scroll_end(animate=False)
+            except Exception:
+                pass
+
+    def _update_history_item(self, record: ExecutionRecord):
+        if record.item_widget:
+            record.item_widget.refresh_display(record)
+
+    # ── Actions ──────────────────────────────────────────────────
 
     def action_refresh_menu(self):
         self.core.reload()
         sidebar = self.query_one("#sidebar")
         old_menu = sidebar.query_one(ScriptMenu)
         old_menu.remove()
-        new_menu = ScriptMenu(
+        sidebar.mount(ScriptMenu(
             self.core.list_scripts(),
             self.core.list_pipelines(),
-        )
-        sidebar.mount(new_menu)
+            on_select=self._on_menu_select,
+        ))
+
+    def _refresh_status(self):
+        running = [n for n, t in self._active_tasks.values() if not t.done()]
+        if running:
+            self.sub_title = " | ".join(running) + " · 执行中"
+        else:
+            self.sub_title = ""
 
     async def action_execute(self):
-        if self._running:
-            return
         if self._current_meta is None:
             return
 
+        name = self._current_meta.name
+
         if self._current_type == "script":
-            await self._execute_script(self._current_meta)
+            params = self._collect_params(self._current_meta)
+            queue = self.core.run_script(name, params)
         elif self._current_type == "pipeline":
-            await self._execute_pipeline(self._current_meta)
-
-    async def _execute_script(self, script):
-        params = self._collect_params(script)
-        self._show_output()
-        output = self.query_one(OutputPanel)
-        output.write_line(f"── 执行: {script.name} ──\n")
-
-        self._running = True
-        queue = self.core.run_script(script.name, params)
-        await self._consume_events(queue)
-
-    async def _execute_pipeline(self, pipeline):
-        self._show_output()
-        output = self.query_one(OutputPanel)
-        output.write_line(f"── 流水线: {pipeline.name} ──\n")
-
-        self._running = True
-        queue = self.core.run_pipeline(pipeline.name)
-        await self._consume_events(queue)
-
-    def action_toggle_fullscreen(self):
-        sidebar = self.query_one("#sidebar")
-        if sidebar.styles.display == "none":
-            sidebar.styles.display = "block"
+            queue = self.core.run_pipeline(name)
         else:
-            sidebar.styles.display = "none"
-
-    def action_export_log(self):
-        output = self.query_one(OutputPanel)
-        if output.get_line_count() == 0:
             return
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = f"toolbox_output_{timestamp}.log"
-        output.export_log(log_path)
-        output.write_line(f"\n已导出到: {log_path}")
 
-    def action_cancel_execution(self):
-        if self._running:
-            self.core.cancel()
+        self._task_seq += 1
+        tid = self._task_seq
 
-    async def action_input_choice(self):
-        if not self._running:
-            return
+        record = ExecutionRecord(tid, name)
+        self._records[tid] = record
+        record.add_line(f"━━ 执行: {name} ━━\n")
+
+        item = HistoryItem(record)
+        record.item_widget = item
+        panel = self.query_one("#history-panel")
+        panel.mount(item)
         try:
-            self.query_one("#choice-input").remove()
+            panel.scroll_end(animate=False)
         except Exception:
             pass
-        input_widget = Input(placeholder="输入选项序号...", id="choice-input")
-        oc = self.query_one("#output-container")
-        oc.mount(input_widget)
-        input_widget.focus()
 
-        def on_submit(message):
+        self._select_record(tid)
+
+        task = asyncio.create_task(self._consume_events(tid, name, queue))
+        self._active_tasks[tid] = (name, task)
+        self._refresh_status()
+
+    def action_toggle_fullscreen(self):
+        self.query_one("#sidebar").toggle_class("hidden")
+
+    def action_toggle_history(self):
+        self.query_one("#history-panel").toggle_class("hidden")
+
+    def action_export_log(self):
+        record = self._records.get(self._current_view_tid) if self._current_view_tid else None
+        if not record or record.get_line_count() == 0:
+            return
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = f"toolbox_output_{record.name}_{ts}.log"
+        record.export(log_path)
+        record.add_line(f"\n已导出到: {log_path}")
+        self._update_output_if_viewing(record.tid, record)
+
+    def action_cancel_execution(self):
+        for tid, (name, task) in list(self._active_tasks.items()):
+            if not task.done():
+                task.cancel()
+        self._active_tasks.clear()
+        self.core.cancel()
+        self._refresh_status()
+
+    async def action_input_choice(self):
+        if not self._is_busy:
+            return
+        if self._choice_input is not None:
+            try:
+                self._choice_input.remove()
+            except Exception:
+                pass
+            self._choice_input = None
+
+        inp = Input(placeholder="输入选项序号...", classes="choice-input")
+        self._choice_input = inp
+        oc = self.query_one("#output-container")
+        oc.mount(inp)
+        inp.focus()
+
+        def on_input_submit(message):
             text = message.value.strip()
             self._handle_user_choice(text)
-            input_widget.remove()
+            try:
+                inp.remove()
+            except Exception:
+                pass
+            self._choice_input = None
 
-        input_widget.on_submit = on_submit
+        inp.on_submit = on_input_submit
 
     def _handle_user_choice(self, text: str):
-        if not text:
+        if not text or not self._last_prompt_step_id:
             return
         if text.isdigit():
             idx = int(text) - 1
@@ -421,45 +555,80 @@ class ToolBoxTUI(App):
                 return
         self.core.respond_prompt(self._last_prompt_step_id, text)
 
-    async def _consume_events(self, queue: asyncio.Queue):
-        output = self.query_one(OutputPanel)
-        while True:
-            event = await queue.get()
-            match event:
-                case ScriptOutput(line=line):
-                    output.write_line(line)
-                case ScriptCompleted(output=out, duration=duration):
-                    output.write_line(f"\n── 执行完成 ({duration:.1f}s) ──")
-                    if out:
-                        for k, v in out.items():
-                            output.write_line(f"  {k}: {v}")
-                case ScriptFailed(error=error, traceback=tb):
-                    output.write_line(f"\n── 执行失败 ──")
-                    output.write_line(f"错误: {error}")
-                    if tb:
-                        for line in tb.strip().split("\n"):
-                            output.write_line(f"  {line}")
-                case PromptRequired(step_id=step_id, message=message, choices=choices):
-                    self._last_prompt_step_id = step_id
-                    self._last_prompt_choices = choices or []
-                    output.write_line(f"\n{message}")
-                    if choices:
-                        for i, c in enumerate(choices):
-                            output.write_line(f"  [{i + 1}] {c}")
-                        output.write_line("\n按 / 输入序号选择")
-                case ConfirmRequired(step_id=step_id, message=message):
-                    output.write_line(f"\n{message}")
-                    output.write_line("  [1] 确认")
-                    output.write_line("  [2] 取消")
-                    output.write_line("\n按 / 输入选项")
-                case PipelineCompleted():
-                    output.write_line(f"\n── 流水线完成 ──")
-                    self._running = False
-                    break
-                case ExecutionEnded():
-                    self._running = False
-                    break
-        self._running = False
+    # ── Event consumption (background task) ──────────────────────
+
+    async def _consume_events(self, tid: int, name: str, queue: asyncio.Queue):
+        record = self._records.get(tid)
+        if not record:
+            return
+        try:
+            while True:
+                event = await queue.get()
+                match event:
+                    case ScriptStarted():
+                        pass
+                    case ScriptOutput(line=line):
+                        record.add_line(line)
+                        self._update_output_if_viewing(tid, record)
+                    case ScriptCompleted(output=out, duration=duration):
+                        record.add_line(f"\n-- {name} 完成 ({duration:.1f}s) --")
+                        if out:
+                            for k, v in out.items():
+                                record.add_line(f"  {k}: {v}")
+                        record.status = "completed"
+                        self._update_history_item(record)
+                        self._update_output_if_viewing(tid, record)
+                    case ScriptFailed(error=error, traceback=tb):
+                        record.add_line(f"\n-- {name} 失败 --")
+                        record.add_line(f"错误: {error}")
+                        if tb:
+                            for line in tb.strip().split("\n"):
+                                record.add_line(f"  {line}")
+                        record.status = "failed"
+                        self._update_history_item(record)
+                        self._update_output_if_viewing(tid, record)
+                    case PromptRequired(step_id=step_id, message=message, choices=choices):
+                        self._last_prompt_step_id = step_id
+                        self._last_prompt_choices = choices or []
+                        record.add_line(f"\n{message}")
+                        if choices:
+                            for i, c in enumerate(choices):
+                                record.add_line(f"  [{i + 1}] {c}")
+                        record.add_line("\n按 / 输入序号选择")
+                        self._update_output_if_viewing(tid, record)
+                    case ConfirmRequired(step_id=step_id, message=message):
+                        self._last_prompt_step_id = step_id
+                        self._last_prompt_choices = ["yes", "no"]
+                        record.add_line(f"\n{message}")
+                        record.add_line("  [1] 确认")
+                        record.add_line("  [2] 取消")
+                        record.add_line("\n按 / 输入选项")
+                        self._update_output_if_viewing(tid, record)
+                    case PipelineCompleted():
+                        record.add_line(f"\n-- {name} 流水线完成 --")
+                        record.status = "completed"
+                        self._update_history_item(record)
+                        self._update_output_if_viewing(tid, record)
+                        break
+                    case ExecutionEnded():
+                        if record.status == "running":
+                            record.status = "completed"
+                            self._update_history_item(record)
+                        break
+        except asyncio.CancelledError:
+            record.add_line(f"\n-- {name} 已取消 --")
+            record.status = "cancelled"
+            self._update_history_item(record)
+            self._update_output_if_viewing(tid, record)
+        finally:
+            self._active_tasks.pop(tid, None)
+            self._refresh_status()
+
+    def on_unmount(self) -> None:
+        for tid, (name, task) in list(self._active_tasks.items()):
+            if not task.done():
+                task.cancel()
+        self._active_tasks.clear()
 
 
 class TUIFrontend(FrontendBase):
