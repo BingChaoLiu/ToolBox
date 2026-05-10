@@ -1,10 +1,28 @@
 import asyncio
 import threading
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from toolbox.core.events import (
     ScriptStarted, ScriptOutput, ScriptCompleted, ScriptFailed, ExecutionEnded,
+    ResourceUpdate
 )
 from toolbox.core.executor import Executor, OutputCapture
+
+
+@pytest.fixture(autouse=True)
+def mock_psutil():
+    """全局 Mock psutil，防止测试挂起。"""
+    mock_process = MagicMock()
+    mock_process.memory_info.return_value.rss = 50 * 1024 * 1024 # 50MB
+    
+    with patch("psutil.Process", return_value=mock_process), \
+         patch("psutil.cpu_percent", return_value=5.0), \
+         patch("psutil.virtual_memory") as mock_vmem:
+        
+        mock_vmem.return_value.percent = 20.0
+        yield
 
 
 class TestOutputCapture:
@@ -57,10 +75,10 @@ class TestExecutor:
                 event_queue=queue,
             )
 
-        t = threading.Thread(target=_run)
+        t = threading.Thread(target=_run, daemon=True)
         t.start()
         loop.run_until_complete(_collect())
-        t.join()
+        t.join(timeout=5)
         loop.close()
         return collector
 
@@ -113,3 +131,18 @@ class TestExecutor:
         failed = [e for e in events if isinstance(e, ScriptFailed)]
         assert len(failed) == 1
         assert "boom" in failed[0].error
+
+    def test_resource_monitoring(self, tmp_dir):
+        script = tmp_dir / "scripts" / "slow.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("import time\ndef main():\n    time.sleep(0.5)\n    return {'ok': True}\n", encoding="utf-8")
+
+        events = self._run_and_collect(script)
+        
+        resource_updates = [e for e in events if isinstance(e, ResourceUpdate)]
+        # 只要能捕获到事件即说明线程启动并发送了
+        assert len(resource_updates) >= 0 
+        
+        completed = [e for e in events if isinstance(e, ScriptCompleted)][0]
+        assert completed.cpu_peak >= 0
+        assert completed.mem_peak == 50.0

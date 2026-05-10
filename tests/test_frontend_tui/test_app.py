@@ -60,7 +60,7 @@ class TestScriptMenuIdMapping:
         """生成的 ID 不含 Unicode 字符。"""
         from toolbox.frontend_tui.app import ScriptMenu
         scripts = [_make_script("崩溃分析"), _make_script("hello")]
-        menu = ScriptMenu(scripts, [])
+        menu = ScriptMenu(scripts, [], on_select=lambda t, n: None)
 
         for safe_id, (item_type, name) in menu._id_map.items():
             assert safe_id.isascii(), f"ID '{safe_id}' is not ASCII"
@@ -74,7 +74,7 @@ class TestScriptMenuIdMapping:
             name="崩溃分析流水线", description="test",
             steps=[], file_path=Path("test.yaml"),
         )]
-        menu = ScriptMenu([], pipelines)
+        menu = ScriptMenu([], pipelines, on_select=lambda t, n: None)
 
         assert len(menu._id_map) == 1
         safe_id, (item_type, name) = list(menu._id_map.items())[0]

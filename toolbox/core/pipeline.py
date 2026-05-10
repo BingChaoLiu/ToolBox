@@ -10,13 +10,15 @@ from toolbox.core.events import (
 )
 from toolbox.core.executor import Executor
 from toolbox.core.config_loader import resolve_value
+from lib.logger import logger
 
 
 class PipelineEngine:
-    def __init__(self, steps: list[dict], scripts_dir: str, project_root: str):
+    def __init__(self, steps: list[dict], scripts_dir: str, project_root: str, tid: int = 0):
         self._steps = steps
         self._scripts_dir = Path(scripts_dir)
         self._project_root = project_root
+        self._tid = tid
         self._executor = Executor(project_root=project_root)
         self._step_outputs: dict[str, dict] = {}
         self._prompt_events: dict[str, threading.Event] = {}
@@ -38,6 +40,7 @@ class PipelineEngine:
         def emit(event):
             loop.call_soon_threadsafe(event_queue.put_nowait, event)
 
+        logger.info(f"流水线引擎启动 (tid={self._tid})")
         self._run_steps(emit)
 
     def _run_steps(self, emit):
@@ -45,6 +48,27 @@ class PipelineEngine:
         while idx < len(self._steps):
             step = self._steps[idx]
             sid = step.get("id", f"step_{idx}")
+
+            # Check condition
+            condition = step.get("if")
+            if condition:
+                resolved_cond = resolve_value(condition, self._step_outputs, is_step_outputs=True)
+                try:
+                    # 如果 resolve_value 返回的是 bool 以外的类型（比如字符串表达式），尝试 eval
+                    if isinstance(resolved_cond, str):
+                        # 简单安全检查：只允许基本的比较运算和逻辑运算
+                        # 这里为了灵活性暂时使用 eval，但在生产商业版中建议使用专用的表达式解析器
+                        should_run = eval(resolved_cond, {"__builtins__": {}}, {})
+                    else:
+                        should_run = bool(resolved_cond)
+                except Exception as e:
+                    logger.error(f"步骤 '{sid}' 条件解析失败: {condition} -> {resolved_cond}, 错误: {e}")
+                    should_run = True # 默认执行
+
+                if not should_run:
+                    logger.info(f"步骤 '{sid}' 跳过 (条件不满足: {condition})")
+                    idx += 1
+                    continue
 
             if step.get("type") == "end":
                 emit(PipelineCompleted(
@@ -58,16 +82,18 @@ class PipelineEngine:
                 message = self._resolve_message(message)
                 choices = [c["label"] for c in step.get("choices", [])]
 
-                emit(PromptRequired(step_id=sid, message=message, choices=choices))
-
+                # 先创建 Event，防止 respond_prompt 先于 wait() 执行导致死锁
                 wait_event = threading.Event()
                 self._prompt_events[sid] = wait_event
+
+                emit(PromptRequired(tid=self._tid, step_id=sid, message=message, choices=choices))
+
                 wait_event.wait()
 
                 choice_label = self._prompt_responses.get(sid, "")
+                self._current_choice = choice_label # 确保当前选择被记录
 
                 if "goto_template" in step:
-                    self._current_choice = choice_label
                     template = step["goto_template"]
                     script_name = template["script"]
                     mapping = template.get("mapping", {})
@@ -105,10 +131,12 @@ class PipelineEngine:
 
             if step.get("type") == "confirm":
                 message = step.get("message", "")
-                emit(ConfirmRequired(step_id=sid, message=message))
-
+                
                 wait_event = threading.Event()
                 self._prompt_events[sid] = wait_event
+
+                emit(ConfirmRequired(tid=self._tid, step_id=sid, message=message))
+
                 wait_event.wait()
 
                 response = self._prompt_responses.get(sid, "no")
@@ -160,11 +188,17 @@ class PipelineEngine:
     def _resolve_mapping(self, mapping: dict) -> dict:
         result = {}
         for key, expr in mapping.items():
-            result[key] = resolve_value(
+            val = resolve_value(
                 expr,
                 self._step_outputs,
                 is_step_outputs=True,
             )
+            # 处理特殊的 ${choice} 变量
+            if val == "${choice}" and self._current_choice is not None:
+                val = self._current_choice
+            elif isinstance(val, str) and "${choice}" in val and self._current_choice is not None:
+                val = val.replace("${choice}", str(self._current_choice))
+            result[key] = val
         return result
 
     def _resolve_message(self, message: str) -> str:

@@ -23,10 +23,19 @@ class ScriptOutput(Event):
 
 
 @dataclass
+class ResourceUpdate(Event):
+    cpu_percent: float
+    memory_percent: float
+    memory_mb: float
+
+
+@dataclass
 class ScriptCompleted(Event):
     script_name: str
     output: dict | None = None
     duration: float = 0.0
+    cpu_peak: float = 0.0
+    mem_peak: float = 0.0
 
 
 @dataclass
@@ -38,6 +47,7 @@ class ScriptFailed(Event):
 
 @dataclass
 class PromptRequired(Event):
+    tid: int
     step_id: str
     message: str = ""
     choices: list[str] | None = None
@@ -45,6 +55,7 @@ class PromptRequired(Event):
 
 @dataclass
 class ConfirmRequired(Event):
+    tid: int
     step_id: str
     message: str = ""
 
@@ -81,6 +92,7 @@ class ScriptMeta:
     outputs: list[str]
     has_manifest: bool
     script_path: Path
+    timeout: int | None = None
 
 
 @dataclass

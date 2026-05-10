@@ -3,9 +3,11 @@ import asyncio
 import pytest
 
 from toolbox.core import ToolboxCore
+from toolbox.core.events import PipelineMeta
 from toolbox.frontend_tui.app import (
-    ToolBoxTUI, ScriptMenu, ExecutionRecord, HistoryItem,
+    ToolBoxTUI, ScriptMenu, ExecutionRecord, HistoryItem, InteractionPanel,
 )
+from textual.widgets import Button
 
 
 def _make_core():
@@ -194,6 +196,67 @@ async def test_execute_guard_without_selection(core):
         await pilot.press("f9")
         await pilot.pause()
         assert len(app._records) == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_interaction(core, tmp_dir):
+    """验证流水线交互流程：显示 InteractionPanel -> 点击按钮 -> 继续执行。"""
+    # 准备 Mock 环境
+    scripts_dir = tmp_dir / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    (scripts_dir / "hello.py").write_text("def main(): print('hello')\n", encoding="utf-8")
+    
+    # 注入一个 Mock 流水线
+    mock_pipeline = PipelineMeta(
+        name="MockInteraction",
+        description="Test pipeline",
+        steps=[
+            {"id": "choose", "type": "prompt", "message": "选一个", "choices": [
+                {"label": "Yes", "goto": "end"},
+            ]},
+            {"id": "end", "type": "end"},
+        ],
+        file_path=tmp_dir / "mock_pipe.yaml"
+    )
+    core._pipelines.append(mock_pipeline)
+
+    app = ToolBoxTUI(core)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        
+        app._on_menu_select("pipeline", "MockInteraction")
+        await pilot.pause()
+        await pilot.press("f9")
+        
+        # 等待交互面板显示
+        ip = app.query_one(InteractionPanel)
+        for _ in range(50):
+            if not ip.has_class("hidden"):
+                break
+            await pilot.pause(0.1)
+        
+        assert not ip.has_class("hidden")
+        
+        # 查找按钮并点击
+        # Button ID 格式在 app.py 中定义为 f"choice-{i}"
+        btn = ip.query(Button).first()
+        await pilot.click(f"#{btn.id}")
+        await pilot.pause()
+        
+        # 验证面板隐藏并任务完成
+        for _ in range(30):
+            if ip.has_class("hidden"):
+                break
+            await pilot.pause(0.1)
+        
+        assert ip.has_class("hidden")
+        
+        for _ in range(50):
+            if not app._is_busy:
+                break
+            await pilot.pause(0.1)
+        
+        assert app._is_busy is False
 
 
 # ── Execution records & history ──────────────────────────────────

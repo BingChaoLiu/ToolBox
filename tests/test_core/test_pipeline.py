@@ -23,7 +23,7 @@ def _make_scripts_dir(tmp_dir):
     return sd
 
 
-def _run_pipeline_collect(steps, scripts_dir, respond_fn=None):
+def _run_pipeline_collect(steps, scripts_dir, respond_fn=None, tid=1):
     loop = asyncio.new_event_loop()
     queue = asyncio.Queue()
     collector = []
@@ -31,6 +31,7 @@ def _run_pipeline_collect(steps, scripts_dir, respond_fn=None):
         steps=steps,
         scripts_dir=str(scripts_dir),
         project_root=str(scripts_dir.parent),
+        tid=tid
     )
 
     async def _collect():

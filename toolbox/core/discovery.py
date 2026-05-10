@@ -55,6 +55,7 @@ def _parse_manifest(script_path: Path, manifest_path: Path) -> ScriptMeta:
         outputs=data.get("outputs", []),
         has_manifest=True,
         script_path=script_path,
+        timeout=data.get("timeout"),
     )
 
 

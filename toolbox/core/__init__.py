@@ -9,6 +9,7 @@ from toolbox.core.discovery import discover_scripts, discover_pipelines, validat
 from toolbox.core.executor import Executor
 from toolbox.core.pipeline import PipelineEngine
 from toolbox.core.events import ScriptMeta, PipelineMeta
+from lib.logger import logger
 
 
 class ToolboxCore:
@@ -18,13 +19,20 @@ class ToolboxCore:
         self._scripts: list[ScriptMeta] = []
         self._pipelines: list[PipelineMeta] = []
         self._executor = Executor()
-        self._current_pipeline_engine: PipelineEngine | None = None
+        self._active_engines: dict[int, PipelineEngine] = {}
+        logger.info(f"ToolboxCore 初始化，配置路径: {config_path}")
 
     def load(self):
-        self._config = load_config(self._config_path)
-        self._reload_discovery()
+        try:
+            self._config = load_config(self._config_path)
+            self._reload_discovery()
+            logger.info("配置与脚本加载完成")
+        except Exception as e:
+            logger.error(f"加载失败: {e}")
+            raise
 
     def reload(self):
+        logger.info("手动刷新菜单 (Reload)")
         self._reload_discovery()
 
     def _reload_discovery(self):
@@ -35,6 +43,7 @@ class ToolboxCore:
         script_names += [s.script_path.stem for s in self._scripts]
         for p in self._pipelines:
             p._warnings = validate_pipeline(p.steps, script_names)
+        logger.info(f"发现 {len(self._scripts)} 个脚本，{len(self._pipelines)} 条流水线")
 
     def list_scripts(self) -> list[ScriptMeta]:
         return self._scripts
@@ -50,6 +59,7 @@ class ToolboxCore:
         script_meta = next((s for s in self._scripts if s.name == name), None)
         if script_meta is None:
             script_meta = next((s for s in self._scripts if s.script_path.stem == name), None)
+        
         if script_meta is None:
             loop = asyncio.get_event_loop()
             from toolbox.core.events import ScriptFailed, ExecutionEnded
@@ -65,12 +75,13 @@ class ToolboxCore:
         thread = threading.Thread(
             target=self._executor.run_script,
             args=(str(script_meta.script_path), params, loop, queue),
+            kwargs={"timeout": script_meta.timeout},
             daemon=True,
         )
         thread.start()
         return queue
 
-    def run_pipeline(self, name: str) -> asyncio.Queue:
+    def run_pipeline(self, name: str, tid: int = 0) -> asyncio.Queue:
         queue = asyncio.Queue()
         pipeline_meta = next((p for p in self._pipelines if p.name == name), None)
         if pipeline_meta is None:
@@ -88,8 +99,9 @@ class ToolboxCore:
             steps=pipeline_meta.steps,
             scripts_dir=str(root / "scripts"),
             project_root=str(root),
+            tid=tid
         )
-        self._current_pipeline_engine = engine
+        self._active_engines[tid] = engine
         thread = threading.Thread(
             target=engine.run,
             args=(loop, queue),
@@ -98,14 +110,17 @@ class ToolboxCore:
         thread.start()
         return queue
 
-    def respond_prompt(self, step_id: str, choice: str):
-        if self._current_pipeline_engine:
-            self._current_pipeline_engine.respond_prompt(step_id, choice)
+    def respond_prompt(self, tid: int, step_id: str, choice: str):
+        engine = self._active_engines.get(tid)
+        if engine:
+            engine.respond_prompt(step_id, choice)
 
-    def respond_confirm(self, step_id: str, confirmed: bool):
-        if self._current_pipeline_engine:
-            self._current_pipeline_engine.respond_confirm(step_id, confirmed)
+    def respond_confirm(self, tid: int, step_id: str, confirmed: bool):
+        engine = self._active_engines.get(tid)
+        if engine:
+            engine.respond_confirm(step_id, confirmed)
 
     def cancel(self):
         from lib.cancel import request_cancel
         request_cancel()
+        # 注意：此处未清理 _active_engines，生产环境应在 ExecutionEnded 时清理
