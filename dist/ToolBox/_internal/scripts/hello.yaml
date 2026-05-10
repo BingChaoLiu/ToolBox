@@ -1,0 +1,8 @@
+category: 未分类
+name: hello
+outputs:
+- result
+params:
+- label: name
+  name: name
+  type: text

@@ -2,8 +2,12 @@ import argparse
 import pathlib
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).parent))
+# 保证能找到项目内的包
+root_dir = pathlib.Path(__file__).parent
+if root_dir.as_posix() not in sys.path:
+    sys.path.insert(0, str(root_dir))
 
+from lib.path_helper import get_project_root
 from toolbox.core import ToolboxCore
 from toolbox.core.discovery import generate_manifest
 from toolbox.frontend_tui.app import TUIFrontend
@@ -16,7 +20,8 @@ FRONTENDS = {
 def cmd_init_script(script_path_str: str, core: ToolboxCore):
     script_path = pathlib.Path(script_path_str)
     if not script_path.exists():
-        alt = pathlib.Path(__file__).parent / "scripts" / (script_path_str.replace(".py", "") + ".py")
+        # 使用 get_project_root 寻找内置脚本
+        alt = get_project_root() / "scripts" / (script_path_str.replace(".py", "") + ".py")
         if alt.exists():
             script_path = alt
         else:
@@ -50,7 +55,11 @@ def main():
     )
     args = parser.parse_args()
 
-    config_path = pathlib.Path(__file__).parent / "config.yaml"
+    # 优先使用当前目录下的 config.yaml，如果没有则使用项目根目录下的
+    config_path = pathlib.Path("config.yaml")
+    if not config_path.exists():
+        config_path = get_project_root() / "config.yaml"
+
     core = ToolboxCore(str(config_path))
 
     if args.init_script:

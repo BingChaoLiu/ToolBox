@@ -21,6 +21,7 @@ from textual.widgets import (
 )
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
+from toolbox import __version__
 from toolbox.core.events import (
     ScriptStarted, ScriptOutput, ScriptCompleted, ScriptFailed,
     PromptRequired, ConfirmRequired, PipelineCompleted, ExecutionEnded,
@@ -381,7 +382,7 @@ class ToolBoxTUI(App):
         return any(not t.done() for _, t in self._active_tasks.values())
 
     def compose(self) -> ComposeResult:
-        yield Static("ToolBox — 开发者工作流利器", id="app-title")
+        yield Static(f"ToolBox v{__version__} — 开发者工作流利器", id="app-title")
         with Horizontal():
             with Vertical(id="sidebar"):
                 yield ScriptMenu(
