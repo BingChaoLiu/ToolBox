@@ -7,7 +7,7 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Footer,
     Header,
@@ -16,19 +16,23 @@ from textual.widgets import (
     ListItem,
     Label,
     Input,
+    Button,
+    Select,
+    Checkbox,
 )
 
 from toolbox.core.events import (
     ScriptStarted, ScriptOutput, ScriptCompleted, ScriptFailed,
     PromptRequired, ConfirmRequired, PipelineCompleted, ExecutionEnded,
 )
+from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
 
 
 class ScriptMenu(ListView):
     def __init__(self, scripts, pipelines):
         items = []
-        self._id_map: dict[str, tuple[str, str]] = {}  # safe_id → (type, name)
+        self._id_map: dict[str, tuple[str, str]] = {}
         categories: dict[str, list] = {}
         for s in scripts:
             cat = s.category or "未分类"
@@ -56,23 +60,11 @@ class ScriptMenu(ListView):
         self._pipelines = {p.name: p for p in pipelines}
 
 
-class ContentPanel(Static):
+class OutputPanel(Static):
     def __init__(self):
-        super().__init__(id="content-panel")
+        super().__init__(id="output-panel")
         self._output_lines: list[str] = []
         self._auto_scroll = True
-
-    def show_welcome(self):
-        self.update(Text.from_markup(
-            "[bold]ToolBox[/bold]\n\n"
-            "选择左侧脚本或流水线开始操作\n\n"
-            "快捷键：\n"
-            "  F5  刷新菜单\n"
-            "  F9  执行\n"
-            "  F11 全屏输出\n"
-            "  Ctrl+S 导出日志\n"
-            "  / 输入选项（流水线交互时）\n"
-        ))
 
     def clear_output(self):
         self._output_lines = []
@@ -86,20 +78,8 @@ class ContentPanel(Static):
         content = "\n".join(self._output_lines[-500:])
         self.update(content)
 
-    def set_auto_scroll(self, enabled: bool):
-        self._auto_scroll = enabled
-        if enabled:
-            self._render_output()
-
     def get_output_text(self) -> str:
         return "\n".join(self._output_lines)
-
-    def search(self, keyword: str) -> list[int]:
-        matches = []
-        for i, line in enumerate(self._output_lines):
-            if keyword.lower() in line.lower():
-                matches.append(i)
-        return matches
 
     def export_log(self, path: str):
         Path(path).write_text(
@@ -129,7 +109,16 @@ class ToolBoxTUI(App):
         width: 1fr;
     }
 
-    #content-panel {
+    #form-container {
+        height: auto;
+        padding: 1 2;
+    }
+
+    #output-container {
+        height: 1fr;
+    }
+
+    #output-panel {
         height: 1fr;
         padding: 0 1;
         overflow-y: auto;
@@ -139,6 +128,24 @@ class ToolBoxTUI(App):
         dock: bottom;
         height: 3;
         margin: 0 1;
+    }
+
+    .form-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    .form-label {
+        margin-top: 1;
+        color: $text-muted;
+    }
+
+    .form-input {
+        margin-bottom: 1;
+    }
+
+    .hidden {
+        display: none;
     }
     """
 
@@ -159,6 +166,7 @@ class ToolBoxTUI(App):
         self._running = False
         self._last_prompt_step_id = None
         self._last_prompt_choices: list[str] = []
+        self._mode = "welcome"  # welcome | form | output
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -169,17 +177,117 @@ class ToolBoxTUI(App):
                     self.core.list_pipelines(),
                 )
             with Vertical(id="main-area"):
-                yield ContentPanel()
+                with VerticalScroll(id="form-container"):
+                    yield Static("欢迎使用 ToolBox\n\n选择左侧脚本或流水线开始操作", id="form-welcome", classes="form-title")
+                with Vertical(id="output-container", classes="hidden"):
+                    yield OutputPanel()
         yield Footer()
 
     def on_mount(self):
-        content = self.query_one(ContentPanel)
-        content.show_welcome()
+        self._show_welcome()
+
+    def _show_welcome(self):
+        self._mode = "welcome"
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.remove_class("hidden")
+        oc.add_class("hidden")
+        fc.query("Static, Input, Select, Checkbox, Button").remove()
+        fc.mount(Static(
+            "欢迎使用 ToolBox\n\n"
+            "选择左侧脚本或流水线开始操作\n\n"
+            "快捷键：\n"
+            "  F5  刷新菜单\n"
+            "  F9  执行\n"
+            "  F11 全屏输出\n"
+            "  Ctrl+S 导出日志\n"
+            "  / 输入选项（流水线交互时）",
+            id="form-welcome",
+        ))
+
+    def _show_form(self, script: ScriptMeta):
+        self._mode = "form"
+        self._current_type = "script"
+        self._current_meta = script
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.remove_class("hidden")
+        oc.add_class("hidden")
+
+        fc.query("Static, Input, Select, Checkbox, Button").remove()
+
+        fc.mount(Static(script.name, classes="form-title"))
+
+        if script.description:
+            fc.mount(Static(script.description))
+
+        if not script.params:
+            fc.mount(Static("无参数，直接按 F9 执行", id="form-no-params"))
+        else:
+            for p in script.params:
+                fc.mount(Static(f"{p.label} ({p.type}){'  [剪贴板]' if p.clipboard else ''}", classes="form-label"))
+                if p.type == "choice" and p.options:
+                    opts = [(str(o), str(o)) for o in p.options]
+                    fc.mount(Select(opts, id=f"param-{p.name}", classes="form-input"))
+                elif p.type == "flag":
+                    fc.mount(Checkbox(p.label, id=f"param-{p.name}", classes="form-input",
+                                       value=bool(p.default) if p.default is not None else False))
+                else:
+                    placeholder = f"默认: {p.default}" if p.default is not None else ""
+                    fc.mount(Input(
+                        id=f"param-{p.name}",
+                        classes="form-input",
+                        placeholder=placeholder,
+                        value=str(p.default) if p.default is not None else "",
+                    ))
+
+        fc.mount(Static("\n按 F9 执行", id="form-hint"))
+
+    def _show_output(self):
+        self._mode = "output"
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.add_class("hidden")
+        oc.remove_class("hidden")
+        output = self.query_one(OutputPanel)
+        output.clear_output()
+
+    def _collect_params(self, script: ScriptMeta) -> dict:
+        params = {}
+        for p in script.params:
+            input_id = f"param-{p.name}"
+            try:
+                widget = self.query_one(f"#{input_id}")
+            except Exception:
+                if p.default is not None:
+                    params[p.name] = p.default
+                continue
+
+            if isinstance(widget, Input):
+                val = widget.value.strip()
+                if val:
+                    params[p.name] = val
+                elif p.default is not None:
+                    params[p.name] = p.default
+            elif isinstance(widget, Select):
+                val = widget.value
+                if val is not None:
+                    params[p.name] = val
+                elif p.default is not None:
+                    params[p.name] = p.default
+            elif isinstance(widget, Checkbox):
+                params[p.name] = widget.value
+            else:
+                if p.default is not None:
+                    params[p.name] = p.default
+        return params
 
     def on_list_view_selected(self, event: ListView.Selected):
         item = event.item
         item_id = item.id
         if not item_id:
+            return
+        if self._running:
             return
 
         menu = self.query_one(ScriptMenu)
@@ -190,11 +298,9 @@ class ToolBoxTUI(App):
         item_type, name = entry
 
         if item_type == "script":
-            self._current_type = "script"
             script = next((s for s in self.core.list_scripts() if s.name == name), None)
             if script:
-                self._current_meta = script
-                self._show_script_form(script)
+                self._show_form(script)
 
         elif item_type == "pipeline":
             self._current_type = "pipeline"
@@ -203,49 +309,27 @@ class ToolBoxTUI(App):
                 self._current_meta = pipeline
                 self._show_pipeline_info(pipeline)
 
-    def _show_script_form(self, script):
-        content = self.query_one(ContentPanel)
-        lines = [f"[bold]{script.name}[/bold]\n"]
-
-        if not script.params:
-            lines.append("[dim]无参数，直接按 F9 执行[/dim]")
-        else:
-            lines.append("[bold]参数（手动输入后按 F9 执行）:[/]\n")
-            for p in script.params:
-                suffix = ""
-                if p.clipboard:
-                    suffix += " [dim][剪贴板][/dim]"
-                if p.type == "choice":
-                    if p.options:
-                        opts = ", ".join(str(o) for o in p.options)
-                        lines.append(f"  {p.label} ({p.type}) 选项: {opts}{suffix}")
-                    else:
-                        lines.append(f"  {p.label} ({p.type}) (从配置加载){suffix}")
-                elif p.type == "flag":
-                    default_val = p.default if p.default is not None else False
-                    lines.append(f"  {p.label} ({p.type}) 默认: {default_val}{suffix}")
-                else:
-                    default_hint = f" 默认: {p.default}" if p.default is not None else ""
-                    lines.append(f"  {p.label} ({p.type}){default_hint}{suffix}")
-
-        content.update(Text.from_markup("\n".join(lines)))
-
     def _show_pipeline_info(self, pipeline):
-        content = self.query_one(ContentPanel)
-        lines = [f"[bold]{pipeline.name}[/bold] (流水线)"]
+        self._mode = "form"
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.remove_class("hidden")
+        oc.add_class("hidden")
+
+        fc.query("Static, Input, Select, Checkbox, Button").remove()
+
+        lines = [pipeline.name, ""]
         if pipeline.description:
-            lines.append(f"\n{pipeline.description}")
-        step_names = []
+            lines.append(pipeline.description)
+        lines.append("")
         for s in pipeline.steps:
             if "script" in s:
-                step_names.append(f"  → {s.get('script', '?')}")
+                lines.append(f"  → {s.get('script', '?')}")
             elif "type" in s:
-                step_names.append(f"  ◆ {s['type']}")
-        if step_names:
-            lines.append("\n[bold]步骤:[/]")
-            lines.extend(step_names)
-        lines.append("\n[dim]按 F9 执行[/dim]")
-        content.update(Text.from_markup("\n".join(lines)))
+                lines.append(f"  ◆ {s['type']}")
+        lines.append("")
+        lines.append("按 F9 执行")
+        fc.mount(Static("\n".join(lines)))
 
     def action_refresh_menu(self):
         self.core.reload()
@@ -270,23 +354,19 @@ class ToolBoxTUI(App):
             await self._execute_pipeline(self._current_meta)
 
     async def _execute_script(self, script):
-        content = self.query_one(ContentPanel)
-        content.clear_output()
-        content.write_line(f"── 执行: {script.name} ──\n")
+        self._show_output()
+        output = self.query_one(OutputPanel)
+        output.write_line(f"── 执行: {script.name} ──\n")
 
-        params = {}
-        for p in script.params:
-            if p.default is not None:
-                params[p.name] = p.default
-
+        params = self._collect_params(script)
         self._running = True
         queue = self.core.run_script(script.name, params)
         await self._consume_events(queue)
 
     async def _execute_pipeline(self, pipeline):
-        content = self.query_one(ContentPanel)
-        content.clear_output()
-        content.write_line(f"── 流水线: {pipeline.name} ──\n")
+        self._show_output()
+        output = self.query_one(OutputPanel)
+        output.write_line(f"── 流水线: {pipeline.name} ──\n")
 
         self._running = True
         queue = self.core.run_pipeline(pipeline.name)
@@ -300,13 +380,13 @@ class ToolBoxTUI(App):
             sidebar.styles.display = "none"
 
     def action_export_log(self):
-        content = self.query_one(ContentPanel)
-        if content.get_line_count() == 0:
+        output = self.query_one(OutputPanel)
+        if output.get_line_count() == 0:
             return
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = f"toolbox_output_{timestamp}.log"
-        content.export_log(log_path)
-        content.write_line(f"\n[dim]已导出到: {log_path}[/dim]")
+        output.export_log(log_path)
+        output.write_line(f"\n已导出到: {log_path}")
 
     def action_cancel_execution(self):
         if self._running:
@@ -315,9 +395,13 @@ class ToolBoxTUI(App):
     async def action_input_choice(self):
         if not self._running:
             return
+        try:
+            self.query_one("#choice-input").remove()
+        except Exception:
+            pass
         input_widget = Input(placeholder="输入选项序号...", id="choice-input")
-        mount_target = self.query_one("#main-area")
-        mount_target.mount(input_widget)
+        oc = self.query_one("#output-container")
+        oc.mount(input_widget)
         input_widget.focus()
 
         def on_submit(message):
@@ -338,38 +422,38 @@ class ToolBoxTUI(App):
         self.core.respond_prompt(self._last_prompt_step_id, text)
 
     async def _consume_events(self, queue: asyncio.Queue):
-        content = self.query_one(ContentPanel)
+        output = self.query_one(OutputPanel)
         while True:
             event = await queue.get()
             match event:
                 case ScriptOutput(line=line):
-                    content.write_line(line)
-                case ScriptCompleted(output=output, duration=duration):
-                    content.write_line(f"\n── 执行完成 ({duration:.1f}s) ──")
-                    if output:
-                        for k, v in output.items():
-                            content.write_line(f"  {k}: {v}")
-                case ScriptFailed(error=error, traceback=traceback_str):
-                    content.write_line(f"\n── 执行失败 ──")
-                    content.write_line(f"错误: {error}")
-                    if traceback_str:
-                        for line in traceback_str.strip().split("\n"):
-                            content.write_line(f"  {line}")
+                    output.write_line(line)
+                case ScriptCompleted(output=out, duration=duration):
+                    output.write_line(f"\n── 执行完成 ({duration:.1f}s) ──")
+                    if out:
+                        for k, v in out.items():
+                            output.write_line(f"  {k}: {v}")
+                case ScriptFailed(error=error, traceback=tb):
+                    output.write_line(f"\n── 执行失败 ──")
+                    output.write_line(f"错误: {error}")
+                    if tb:
+                        for line in tb.strip().split("\n"):
+                            output.write_line(f"  {line}")
                 case PromptRequired(step_id=step_id, message=message, choices=choices):
                     self._last_prompt_step_id = step_id
                     self._last_prompt_choices = choices or []
-                    content.write_line(f"\n[bold]{message}[/]")
+                    output.write_line(f"\n{message}")
                     if choices:
                         for i, c in enumerate(choices):
-                            content.write_line(f"  [{i + 1}] {c}")
-                        content.write_line("\n[dim]按 / 输入序号选择[/dim]")
+                            output.write_line(f"  [{i + 1}] {c}")
+                        output.write_line("\n按 / 输入序号选择")
                 case ConfirmRequired(step_id=step_id, message=message):
-                    content.write_line(f"\n[bold]{message}[/]")
-                    content.write_line("  [1] 确认")
-                    content.write_line("  [2] 取消")
-                    content.write_line("\n[dim]按 / 输入选项[/dim]")
-                case PipelineCompleted(pipeline_name=pipeline_name):
-                    content.write_line(f"\n── 流水线完成 ──")
+                    output.write_line(f"\n{message}")
+                    output.write_line("  [1] 确认")
+                    output.write_line("  [2] 取消")
+                    output.write_line("\n按 / 输入选项")
+                case PipelineCompleted():
+                    output.write_line(f"\n── 流水线完成 ──")
                     self._running = False
                     break
                 case ExecutionEnded():
