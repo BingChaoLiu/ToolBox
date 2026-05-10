@@ -178,7 +178,7 @@ class ToolBoxTUI(App):
                 )
             with Vertical(id="main-area"):
                 with VerticalScroll(id="form-container"):
-                    yield Static("欢迎使用 ToolBox\n\n选择左侧脚本或流水线开始操作", id="form-welcome", classes="form-title")
+                    pass
                 with Vertical(id="output-container", classes="hidden"):
                     yield OutputPanel()
         yield Footer()
@@ -202,7 +202,7 @@ class ToolBoxTUI(App):
             "  F11 全屏输出\n"
             "  Ctrl+S 导出日志\n"
             "  / 输入选项（流水线交互时）",
-            id="form-welcome",
+            classes="form-title",
         ))
 
     def _show_form(self, script: ScriptMeta):
@@ -222,7 +222,7 @@ class ToolBoxTUI(App):
             fc.mount(Static(script.description))
 
         if not script.params:
-            fc.mount(Static("无参数，直接按 F9 执行", id="form-no-params"))
+            fc.mount(Static("无参数，直接按 F9 执行", classes="form-hint"))
         else:
             for p in script.params:
                 fc.mount(Static(f"{p.label} ({p.type}){'  [剪贴板]' if p.clipboard else ''}", classes="form-label"))
@@ -241,7 +241,7 @@ class ToolBoxTUI(App):
                         value=str(p.default) if p.default is not None else "",
                     ))
 
-        fc.mount(Static("\n按 F9 执行", id="form-hint"))
+        fc.mount(Static("\n按 F9 执行", classes="form-hint"))
 
     def _show_output(self):
         self._mode = "output"
