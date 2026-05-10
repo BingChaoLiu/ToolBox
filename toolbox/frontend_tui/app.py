@@ -28,20 +28,28 @@ from toolbox.frontend_base import FrontendBase
 class ScriptMenu(ListView):
     def __init__(self, scripts, pipelines):
         items = []
+        self._id_map: dict[str, tuple[str, str]] = {}  # safe_id → (type, name)
         categories: dict[str, list] = {}
         for s in scripts:
             cat = s.category or "未分类"
             categories.setdefault(cat, []).append(s)
 
+        idx = 0
         for cat, cat_scripts in categories.items():
             items.append(ListItem(Label(Text(f"── {cat} ──", style="bold cyan"))))
             for s in cat_scripts:
-                items.append(ListItem(Label(s.name), id=f"script:{s.name}"))
+                safe_id = f"item-{idx}"
+                self._id_map[safe_id] = ("script", s.name)
+                items.append(ListItem(Label(s.name), id=safe_id))
+                idx += 1
 
         if pipelines:
             items.append(ListItem(Label(Text("── 流水线 ──", style="bold cyan"))))
             for p in pipelines:
-                items.append(ListItem(Label(p.name), id=f"pipeline:{p.name}"))
+                safe_id = f"item-{idx}"
+                self._id_map[safe_id] = ("pipeline", p.name)
+                items.append(ListItem(Label(p.name), id=safe_id))
+                idx += 1
 
         super().__init__(*items)
         self._scripts = {s.name: s for s in scripts}
@@ -174,16 +182,21 @@ class ToolBoxTUI(App):
         if not item_id:
             return
 
-        if item_id.startswith("script:"):
-            name = item_id[len("script:"):]
+        menu = self.query_one(ScriptMenu)
+        entry = menu._id_map.get(item_id)
+        if not entry:
+            return
+
+        item_type, name = entry
+
+        if item_type == "script":
             self._current_type = "script"
             script = next((s for s in self.core.list_scripts() if s.name == name), None)
             if script:
                 self._current_meta = script
                 self._show_script_form(script)
 
-        elif item_id.startswith("pipeline:"):
-            name = item_id[len("pipeline:"):]
+        elif item_type == "pipeline":
             self._current_type = "pipeline"
             pipeline = next((p for p in self.core.list_pipelines() if p.name == name), None)
             if pipeline:
