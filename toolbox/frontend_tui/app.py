@@ -354,11 +354,11 @@ class ToolBoxTUI(App):
             await self._execute_pipeline(self._current_meta)
 
     async def _execute_script(self, script):
+        params = self._collect_params(script)
         self._show_output()
         output = self.query_one(OutputPanel)
         output.write_line(f"── 执行: {script.name} ──\n")
 
-        params = self._collect_params(script)
         self._running = True
         queue = self.core.run_script(script.name, params)
         await self._consume_events(queue)

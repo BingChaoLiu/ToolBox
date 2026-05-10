@@ -1,0 +1,28 @@
+name: 每日检查
+description: 系统信息 → 目录扫描 → 完成
+
+steps:
+  - id: sysinfo
+    script: system_info
+
+  - id: dirscan
+    script: dir_scan
+    mapping:
+      path: "."
+
+  - id: ask
+    type: prompt
+    message: "检查完成，是否再次扫描其他目录？"
+    choices:
+      - label: "扫描项目目录"
+        goto: scan_project
+      - label: "结束"
+        goto: end
+
+  - id: scan_project
+    script: dir_scan
+    mapping:
+      path: "."
+
+  - id: end
+    type: end

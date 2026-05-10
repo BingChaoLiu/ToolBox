@@ -1,0 +1,5 @@
+name: 系统信息
+description: 显示当前系统环境信息
+category: 工具
+params: []
+outputs: []
