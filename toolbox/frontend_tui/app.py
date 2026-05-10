@@ -218,15 +218,15 @@ class ToolBoxTUI(App):
                 if p.type == "choice":
                     if p.options:
                         opts = ", ".join(str(o) for o in p.options)
-                        lines.append(f"  {p.label} [{p.type}] 选项: {opts}{suffix}")
+                        lines.append(f"  {p.label} ({p.type}) 选项: {opts}{suffix}")
                     else:
-                        lines.append(f"  {p.label} [{p.type}] (从配置加载){suffix}")
+                        lines.append(f"  {p.label} ({p.type}) (从配置加载){suffix}")
                 elif p.type == "flag":
                     default_val = p.default if p.default is not None else False
-                    lines.append(f"  {p.label} [{p.type}] 默认: {default_val}{suffix}")
+                    lines.append(f"  {p.label} ({p.type}) 默认: {default_val}{suffix}")
                 else:
                     default_hint = f" 默认: {p.default}" if p.default is not None else ""
-                    lines.append(f"  {p.label} [{p.type}]{default_hint}{suffix}")
+                    lines.append(f"  {p.label} ({p.type}){default_hint}{suffix}")
 
         content.update(Text.from_markup("\n".join(lines)))
 
