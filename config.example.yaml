@@ -1,0 +1,37 @@
+# config.example.yaml
+# 复制为 config.yaml 并填写实际值
+
+build:
+  project_path: "D:/path/to/android/project"
+  gradlew: "gradlew.bat"
+  java_home: "C:/path/to/jdk"
+  variants: [debug, release]
+  flavors: [channel_a, channel_b]
+
+git:
+  repos:
+    - name: "主项目"
+      path: "D:/path/to/repo"
+      branch: "main"
+    - name: "模块A"
+      path: "D:/path/to/module_a"
+      branch: "dev"
+
+addr2line:
+  tool_path: "addr2line"
+  default_so: "D:/path/to/libapp.so"
+  so_files:
+    - name: "libapp"
+      path: "D:/path/to/libapp.so"
+    - name: "libnative"
+      path: "D:/path/to/libnative.so"
+
+email:
+  imap_server: "imap.qq.com"
+  imap_port: 993
+  account: "your_email@qq.com"
+  auth_code: "your_auth_code"
+  filter:
+    from: ["bug-report@example.com"]
+    subject_keywords: ["问题", "bug", "crash"]
+  recent_count: 20

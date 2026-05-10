@@ -1,0 +1,21 @@
+name: 崩溃分析流水线
+description: 从剪贴板读取崩溃地址，分析源码位置
+
+steps:
+  - id: analyze
+    script: addr2line
+    mapping:
+      address: "${choice}"
+      so_file: "${config:addr2line.default_so}"
+
+  - id: after
+    type: prompt
+    message: "分析完成，下一步："
+    choices:
+      - label: "重新分析"
+        goto: analyze
+      - label: "结束"
+        goto: end
+
+  - id: end
+    type: end
