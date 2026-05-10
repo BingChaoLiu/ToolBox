@@ -41,6 +41,7 @@ def _parse_manifest(script_path: Path, manifest_path: Path) -> ScriptMeta:
             label=p.get("label", p["name"]),
             type=p.get("type", "text"),
             default=p.get("default"),
+            description=p.get("description", ""),
             multiline=p.get("multiline", False),
             clipboard=p.get("clipboard", False),
             options=p.get("options"),

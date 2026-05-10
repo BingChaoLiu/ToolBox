@@ -207,11 +207,14 @@ class ScriptMenu(ListView):
 class ToolBoxTUI(App):
     TITLE = "ToolBox"
 
+    # CSS 样式定义：调整此处可以改变软件的视觉外观
     CSS = """
+    /* 基础屏幕背景 */
     Screen {
         background: $surface;
     }
 
+    /* 顶部标题栏 */
     #app-title {
         background: $primary-darken-3;
         color: $text;
@@ -222,18 +225,20 @@ class ToolBoxTUI(App):
         width: 100%;
     }
 
+    /* 左侧侧边栏：包含脚本和流水线列表 */
     #sidebar {
         width: 30;
         background: $surface-darken-2;
         border-right: solid $surface;
     }
 
+    /* 中间主操作区 */
     #main-area {
         width: 1fr;
         background: $surface;
     }
 
-    /* 修复 Command Palette 样式为居中 Modal */
+    /* 修复 Command Palette (F1) 样式为居中 Modal */
     CommandPalette {
         background: rgba(0, 0, 0, 0.5);
         align: center middle;
@@ -247,6 +252,7 @@ class ToolBoxTUI(App):
         background: $surface;
     }
 
+    /* 资源监控栏：显示在主区域顶部 */
     #resource-monitor {
         background: transparent;
         color: $text-muted;
@@ -258,6 +264,7 @@ class ToolBoxTUI(App):
         opacity: 0.6;
     }
 
+    /* 底部交互面板：用于 Prompt 和 Confirm */
     #interaction-panel {
         background: $surface-lighten-1;
         padding: 1 4;
@@ -266,11 +273,13 @@ class ToolBoxTUI(App):
         border-top: solid $primary-darken-2;
     }
 
+    /* 交互面板内的按钮容器 */
     .choice-buttons {
         margin-top: 1;
         height: 3;
     }
 
+    /* 交互面板内的通用按钮样式 */
     .choice-buttons Button {
         border: none;
         background: $primary-darken-2;
@@ -285,27 +294,32 @@ class ToolBoxTUI(App):
         text-style: bold;
     }
 
+    /* 脚本参数表单容器 */
     #form-container {
         height: auto;
         padding: 2 4;
     }
 
+    /* 脚本运行输出容器 */
     #output-container {
         height: 1fr;
         margin: 0;
     }
 
+    /* 输出文本面板 */
     #output-panel {
         padding: 1 2;
         color: $text;
     }
 
+    /* 右侧历史记录面板 */
     #history-panel {
         width: 32;
         background: $surface-darken-2;
         border-left: solid $surface;
     }
 
+    /* 历史面板标题 */
     #history-title {
         text-style: bold;
         padding: 1 2;
@@ -313,6 +327,7 @@ class ToolBoxTUI(App):
         background: $surface-darken-3;
     }
 
+    /* 单个历史条目样式 */
     .history-item {
         padding: 1 2;
         height: auto;
@@ -323,35 +338,43 @@ class ToolBoxTUI(App):
         background: $surface-darken-1;
     }
 
+    /* 选中时的历史条目高亮 */
     .history-item.selected {
         background: $primary-darken-3;
         border-left: solid $primary;
     }
 
+    /* 状态颜色定义 */
     .status-running { color: $warning; }
     .status-completed { color: $success; }
     .status-failed { color: $error; }
     .status-cancelled { color: $text-muted; }
 
+    /* 表单中的标题（脚本名） */
     .form-title {
         text-style: bold;
         color: $primary;
         margin-bottom: 2;
     }
 
+    /* 表单中的参数标签 */
     .form-label {
         margin-top: 1;
         color: $secondary;
         text-style: bold;
     }
 
+    /* 表单中的输入框/下拉框样式 */
     .form-input {
         margin-bottom: 1;
+        content-align: left middle;
+        height: 3;
+        padding: 0 1;
         border: none;
         background: $surface-darken-1;
-        padding: 0 1;
     }
 
+    /* 通用隐藏样式 */
     .hidden {
         display: none;
     }
@@ -439,64 +462,60 @@ class ToolBoxTUI(App):
         self._current_meta = script
         self._clear_form()
         self._param_widget_ids = {}
-        try:
-            fc = self.query_one("#form-container")
-            oc = self.query_one("#output-container")
-            fc.remove_class("hidden")
-            oc.add_class("hidden")
+        
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.remove_class("hidden")
+        oc.add_class("hidden")
 
-            fc.mount(Static(f"📝 {script.name}", classes="form-title"))
-            if script.description:
-                fc.mount(Static(f"{script.description}\n", classes="form-hint"))
+        fc.mount(Static(f"📝 {script.name}", classes="form-title"))
+        if script.description:
+            fc.mount(Static(f"{script.description}\n", classes="form-hint"))
 
-            for p in script.params:
-                fc.mount(Label(f"{p.label or p.name}:", classes="form-label"))
-                widget_id = _fresh_id("param")
-                self._param_widget_ids[p.name] = widget_id
+        for p in script.params:
+            fc.mount(Label(f"{p.label or p.name}:", classes="form-label"))
+            widget_id = _fresh_id("param")
+            self._param_widget_ids[p.name] = widget_id
 
-                if p.type == "choice":
-                    fc.mount(Select(
-                        [(c, c) for c in (p.options or [])],
-                        value=p.default,
-                        id=widget_id,
-                        classes="form-input",
-                    ))
-                elif p.type == "bool":
-                    fc.mount(Checkbox(
-                        p.label or p.name,
-                        value=bool(p.default),
-                        id=widget_id,
-                        classes="form-input",
-                    ))
-                else:
-                    fc.mount(Input(
-                        value=str(p.default) if p.default is not None else "",
-                        placeholder=p.description or "",
-                        id=widget_id,
-                        classes="form-input",
-                    ))
-        except Exception:
-            pass
+            if p.type == "choice":
+                fc.mount(Select(
+                    [(str(c), str(c)) for c in (p.options or [])],
+                    value=str(p.default) if p.default is not None else None,
+                    id=widget_id,
+                    classes="form-input",
+                ))
+            elif p.type == "bool" or p.type == "flag":
+                fc.mount(Checkbox(
+                    p.label or p.name,
+                    value=bool(p.default),
+                    id=widget_id,
+                    classes="form-input",
+                ))
+            else:
+                # 暂时都用 Input，Textual 的 TextArea 在旧版本可能不支持
+                fc.mount(Input(
+                    value=str(p.default) if p.default is not None else "",
+                    placeholder=p.description or "",
+                    id=widget_id,
+                    classes="form-input",
+                ))
 
     def _show_pipeline_info(self, pipeline: PipelineMeta):
         self._clear_form()
-        try:
-            fc = self.query_one("#form-container")
-            oc = self.query_one("#output-container")
-            fc.remove_class("hidden")
-            oc.add_class("hidden")
+        fc = self.query_one("#form-container")
+        oc = self.query_one("#output-container")
+        fc.remove_class("hidden")
+        oc.add_class("hidden")
 
-            fc.mount(Static(f"⛓️ {pipeline.name}", classes="form-title"))
-            if pipeline.description:
-                fc.mount(Static(f"{pipeline.description}\n", classes="form-hint"))
+        fc.mount(Static(f"⛓️ {pipeline.name}", classes="form-title"))
+        if pipeline.description:
+            fc.mount(Static(f"{pipeline.description}\n", classes="form-hint"))
 
-            fc.mount(Label("流水线步骤:", classes="form-label"))
-            for i, step in enumerate(pipeline.steps):
-                sid = step.get("id", f"step_{i}")
-                stype = step.get("type", "script")
-                fc.mount(Static(f"  {i+1}. [{stype}] {sid}", classes="form-hint"))
-        except Exception:
-            pass
+        fc.mount(Label("流水线步骤:", classes="form-label"))
+        for i, step in enumerate(pipeline.steps):
+            sid = step.get("id", f"step_{i}")
+            stype = step.get("type", "script")
+            fc.mount(Static(f"  {i+1}. [{stype}] {sid}", classes="form-hint"))
 
     def _collect_params(self, script: ScriptMeta) -> dict:
         params = {}

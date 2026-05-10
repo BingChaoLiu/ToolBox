@@ -77,6 +77,7 @@ class ParamDef:
     label: str
     type: str = "text"
     default: Any = None
+    description: str = ""
     multiline: bool = False
     clipboard: bool = False
     options: list | None = None
