@@ -7,6 +7,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
+from typing import Callable
 
 from lib.cancel import reset as reset_cancel
 from toolbox.core.events import (
@@ -57,12 +58,15 @@ class Executor:
         spec.loader.exec_module(mod)
         return mod.main
 
-    def run_script(self, script_path: str, params: dict, loop: asyncio.AbstractEventLoop, event_queue: asyncio.Queue):
+    def run_script(self, script_path: str, params: dict, loop: asyncio.AbstractEventLoop, event_queue: asyncio.Queue, emit_fn: Callable | None = None):
         self._current_script = Path(script_path).stem
         reset_cancel()
 
-        def emit(event):
-            loop.call_soon_threadsafe(event_queue.put_nowait, event)
+        if emit_fn:
+            emit = emit_fn
+        else:
+            def emit(event):
+                loop.call_soon_threadsafe(event_queue.put_nowait, event)
 
         emit(ScriptStarted(script_name=self._current_script))
 
