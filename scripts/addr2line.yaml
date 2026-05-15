@@ -1,21 +1,19 @@
-name: 崩溃地址分析
-description: 解析 native 崩溃地址对应的源码位置
+name: 崩溃日志分析
+description: 解析 Android Native 崩溃日志中的符号信息 (需要 .so/.elf 文件)
 category: 调试
 
 params:
-  - name: address
-    label: 崩溃地址
+  - name: crash_log
+    label: 崩溃日志
     type: text
     multiline: true
     clipboard: true
+    description: 直接粘贴 logcat 崩溃信息，自动提取 pc 地址
 
   - name: so_file
-    label: SO 文件
-    type: choice
-    options_from:
-      source: config:addr2line.so_files
-      label_field: name
-      value_field: path
+    label: SO 文件路径
+    type: text
+    description: 拖入或填入带符号表的 .so/.elf 文件路径
 
 outputs:
   - results

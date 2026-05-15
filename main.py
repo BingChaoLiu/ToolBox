@@ -42,6 +42,12 @@ def cmd_init_script(script_path_str: str, core: ToolboxCore):
 
 
 def main():
+    # 修复 Windows 下的编码问题
+    if sys.platform == "win32":
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+
     parser = argparse.ArgumentParser(description="ToolBox — Android 开发工作流自动化工具")
     parser.add_argument(
         "--frontend", default="tui",

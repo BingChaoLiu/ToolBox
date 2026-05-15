@@ -28,12 +28,17 @@ class TestGetConfig:
         assert isinstance(result, list)
         assert result[0]["name"] == "主项目"
 
-    def test_missing_key_raises_key_error(self, project_root):
+    def test_missing_key_returns_default(self, project_root):
+        from lib.config import get_config
         import lib.config
         lib.config._CONFIG_PATH = project_root / "config.yaml"
+        lib.config._config = None # 清理缓存
 
-        with pytest.raises(KeyError):
-            lib.config.get_config("nonexistent.key")
+        # 默认返回 None，不再抛出异常
+        assert get_config("missing.key") is None
+        # 也可以指定默认值
+        assert get_config("missing.key", "fallback") == "fallback"
+
 
     def test_env_var_overrides_default_path(self, tmp_dir):
         config = {"test_key": "from_env"}

@@ -1,0 +1,35 @@
+name: Launcher 模块更新
+description: 从 origin 远程更新所有或指定的模块（⚠️ 会丢弃本地修改）
+category: Launcher
+
+params:
+  - name: check
+    label: 仅检查更新
+    type: flag
+    default: false
+
+  - name: update_url
+    label: 更新 Git URL
+    type: flag
+    default: false
+
+  - name: modules
+    label: 指定模块
+    type: text
+    description: 多个模块用逗号分隔，留空则处理全部
+
+  - name: submodules_only
+    label: 仅子模块
+    type: flag
+    default: false
+
+  - name: main_modules_only
+    label: 仅主模块
+    type: flag
+    default: false
+
+outputs:
+  - success_count
+  - failed_count
+  - updated_count
+  - modules_with_updates

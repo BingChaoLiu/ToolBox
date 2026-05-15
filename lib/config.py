@@ -12,13 +12,22 @@ _CONFIG_PATH = pathlib.Path(
 _config = None
 
 
-def get_config(dot_path: str):
+def get_config(dot_path: str, default=None):
     global _config
     if _config is None:
+        if not _CONFIG_PATH.exists():
+            return default
         with open(_CONFIG_PATH, encoding="utf-8") as f:
-            _config = yaml.safe_load(f)
+            _config = yaml.safe_load(f) or {}
+    
     keys = dot_path.split(".")
     value = _config
-    for key in keys:
-        value = value[key]
-    return value
+    try:
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return default
+        return value
+    except (KeyError, TypeError):
+        return default

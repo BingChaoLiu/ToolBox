@@ -18,6 +18,7 @@ from textual.widgets import (
     Select,
     Checkbox,
     Button,
+    TextArea,
 )
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
@@ -478,11 +479,40 @@ class ToolBoxTUI(App):
             self._param_widget_ids[p.name] = widget_id
 
             if p.type == "choice":
+                options = []
+                if p.options:
+                    options = [(str(c), str(c)) for c in p.options]
+                elif p.options_from:
+                    from toolbox.core.config_loader import resolve_value
+                    # 解析 options_from
+                    source = p.options_from.get("source")
+                    if source:
+                        resolved_options = resolve_value(source, self.core.get_config())
+                        if isinstance(resolved_options, list):
+                            label_field = p.options_from.get("label_field")
+                            value_field = p.options_from.get("value_field")
+                            for opt in resolved_options:
+                                if isinstance(opt, dict) and label_field and value_field:
+                                    options.append((str(opt.get(label_field, "")), str(opt.get(value_field, ""))))
+                                else:
+                                    options.append((str(opt), str(opt)))
+                
+                # 确保 value 合法，如果 options 为空或 value 不在 options 中，使用 Select.NULL 或 Select.BLANK
+                # Textual 不同版本的 sentinel 名称不同 (NULL 或 BLANK)
+                sentinel = getattr(Select, "NULL", getattr(Select, "BLANK", None))
+                default_val = str(p.default) if p.default is not None else None
+                valid_value = sentinel
+                
+                if default_val is not None:
+                    if any(str(opt[1]) == default_val for opt in options):
+                        valid_value = default_val
+
                 fc.mount(Select(
-                    [(str(c), str(c)) for c in (p.options or [])],
-                    value=str(p.default) if p.default is not None else None,
+                    options,
+                    value=valid_value,
                     id=widget_id,
                     classes="form-input",
+                    allow_blank=True,
                 ))
             elif p.type == "bool" or p.type == "flag":
                 fc.mount(Checkbox(
@@ -492,13 +522,21 @@ class ToolBoxTUI(App):
                     classes="form-input",
                 ))
             else:
-                # 暂时都用 Input，Textual 的 TextArea 在旧版本可能不支持
-                fc.mount(Input(
-                    value=str(p.default) if p.default is not None else "",
-                    placeholder=p.description or "",
-                    id=widget_id,
-                    classes="form-input",
-                ))
+                if getattr(p, "multiline", False):
+                    widget = TextArea(
+                        text=str(p.default) if p.default is not None else "",
+                        id=widget_id,
+                        classes="form-input",
+                    )
+                    widget.styles.height = 10  # 多行文本框默认高度
+                    fc.mount(widget)
+                else:
+                    fc.mount(Input(
+                        value=str(p.default) if p.default is not None else "",
+                        placeholder=p.description or "",
+                        id=widget_id,
+                        classes="form-input",
+                    ))
 
     def _show_pipeline_info(self, pipeline: PipelineMeta):
         self._clear_form()
@@ -527,9 +565,14 @@ class ToolBoxTUI(App):
                     if isinstance(widget, Input):
                         params[p.name] = widget.value
                     elif isinstance(widget, Select):
-                        params[p.name] = widget.value
+                        val = widget.value
+                        # 处理 Textual 的 sentinel (NULL 或 BLANK)
+                        sentinel = getattr(Select, "NULL", getattr(Select, "BLANK", None))
+                        params[p.name] = None if val == sentinel else val
                     elif isinstance(widget, Checkbox):
                         params[p.name] = widget.value
+                    elif isinstance(widget, TextArea):
+                        params[p.name] = widget.text
                 except Exception:
                     params[p.name] = p.default
         return params
@@ -742,6 +785,33 @@ class ToolBoxTUI(App):
                 ip.hide()
         except Exception:
             pass
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        """处理鼠标点击，实现右键粘贴功能。"""
+        if event.button == 2:  # 右键点击
+            result = self.get_widget_at(event.screen_x, event.screen_y)
+            widget = result[0] if result else None
+            
+            if isinstance(widget, (Input, TextArea)):
+                from lib.clipboard import read as clip_read
+                try:
+                    text = clip_read()
+                    if text:
+                        lines = text.splitlines()
+                        num_lines = len(lines)
+                        if isinstance(widget, Input):
+                            # Input 仅取第一行并去掉首尾空白
+                            widget.value = lines[0].strip() if num_lines > 0 else ""
+                        else:
+                            # TextArea 支持多行
+                            widget.load_text(text)
+                            widget.scroll_cursor_visible()
+                        
+                        # 显示粘贴成功提示
+                        self.notify(f"已从剪切板粘贴 {num_lines} 行文本", title="粘贴成功")
+                        widget.focus()
+                except Exception:
+                    pass
 
     # ── Event consumption (background task) ──────────────────────
 

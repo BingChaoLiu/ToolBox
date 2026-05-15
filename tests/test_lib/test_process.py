@@ -5,7 +5,8 @@ from lib.process import run
 
 class TestRun:
     def test_returns_exit_code_zero_on_success(self):
-        code = run(["echo", "hello"])
+        # 使用 python 命令代替 echo，以保证跨平台兼容性
+        code = run(["python", "-c", "print('hello')"])
         assert code == 0
 
     def test_returns_nonzero_on_failure(self):
