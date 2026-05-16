@@ -23,12 +23,11 @@ from lib.launcher_utils import (
 )
 from lib.config import get_config
 
-# URL conversion patterns
-URL_PATTERNS = [
-    (r'^http://192\.168\.0\.20:6789', 'http://bingchao.liu:12345678@112.91.80.106:23911'),
-    (r'^http://112\.91\.80\.106:23911', 'http://bingchao.liu:12345678@112.91.80.106:23911'),
-    (r'^git@192\.168\.1\.232:', 'http://bingchao.liu:12345678@112.91.80.106:23911/'),
-]
+
+def _get_url_patterns():
+    """从 config.yaml 读取 URL 转换规则，避免凭据硬编码。"""
+    patterns = get_config("launcher_group.url_patterns", [])
+    return [(p["pattern"], p["replacement"]) for p in patterns if "pattern" in p and "replacement" in p]
 
 
 def update_git_remote_url(module_path: Path, module_name: str) -> bool:
@@ -43,7 +42,7 @@ def update_git_remote_url(module_path: Path, module_name: str) -> bool:
 
         # Check if URL needs conversion
         new_url = None
-        for pattern, replacement in URL_PATTERNS:
+        for pattern, replacement in _get_url_patterns():
             if re.match(pattern, current_url):
                 new_url = re.sub(pattern, replacement, current_url)
                 break

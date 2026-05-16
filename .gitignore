@@ -8,6 +8,27 @@ __pycache__/
 venv/
 ENV/
 
-# Project specific
+# Build / Package
+dist/
+build/
+*.spec
+
+# Config (含敏感信息，只追踪模板)
+config.yaml
+
+# Log
 toolbox_framework.log
 *.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (设计过程文件)
+docs/superpowers/

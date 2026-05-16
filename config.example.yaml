@@ -35,3 +35,16 @@ email:
     from: ["bug-report@example.com"]
     subject_keywords: ["问题", "bug", "crash"]
   recent_count: 20
+
+launcher_group:
+  path: "D:/path/to/launcher/group"
+  server:
+    remote_name: "server"
+    url_base: "http://user:pass@192.168.0.20:6789/RefactorLauncher/"
+  url_patterns:
+    - pattern: '^http://192\.168\.0\.20:6789'
+      replacement: 'http://user:pass@112.91.80.106:23911'
+    - pattern: '^http://112\.91\.80\.106:23911'
+      replacement: 'http://user:pass@112.91.80.106:23911'
+    - pattern: '^git@192\.168\.1\.232:'
+      replacement: 'http://user:pass@112.91.80.106:23911/'

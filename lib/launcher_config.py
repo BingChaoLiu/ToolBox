@@ -5,15 +5,24 @@ Contains all module definitions and their branch configurations.
 
 from typing import Dict, List, Tuple, Optional
 
+from lib.config import get_config
+
 # Git remote configuration
 ORIGIN_REMOTE = "origin"
 SERVER_REMOTE = "server"
 
-# Server URL base
-SERVER_URL_BASE = "http://rink:mktech2023@192.168.0.20:6789/RefactorLauncher/"
+
+def get_server_url_base() -> str:
+    """从 config.yaml 读取 server URL，避免凭据硬编码。"""
+    return get_config("launcher_group.server.url_base", "")
+
+
+def get_remote_name() -> str:
+    """从 config.yaml 读取 server remote 名称。"""
+    return get_config("launcher_group.server.remote_name", "server")
+
 
 # Modules that have a 'server' remote configured
-# These are used in sync.ps1 to push to server
 MODULES_WITH_SERVER = {
     "airyethereal_launcher",
     "aurora",
@@ -63,10 +72,7 @@ MODULES_WITH_SERVER = {
 }
 
 # Branch configuration for update.py
-# Format: {module_name: origin_branch}
-# update.py 将本地重置到 origin/<branch>
 UPDATE_BRANCHES: Dict[str, str] = {
-    # Main modules
     "vitality": "main",
     "gulf": "master",
     "lake": "master",
@@ -85,8 +91,6 @@ UPDATE_BRANCHES: Dict[str, str] = {
     "iolite": "main",
     "lost": "main",
     "chmax": "refactor",
-
-    # Launcher submodules (end with _launcher)
     "vitality_launcher": "main",
     "epic_launcher": "main",
     "sand_launcher": "main",
@@ -106,8 +110,6 @@ UPDATE_BRANCHES: Dict[str, str] = {
     "Verve_Launcher": "main",
     "lustrous": "main",
     "airyethereal_launcher": "main",
-
-    # Common submodules
     "dvbservice": "master",
     "presenterlib": "master",
     "common_for_view": "master",
@@ -128,10 +130,7 @@ UPDATE_BRANCHES: Dict[str, str] = {
 }
 
 # Branch configuration for sync.py
-# Format: {module_name: (server_branch, local_branch)}
-# sync.py 将本地的 local_branch 分支推送到 server 的 server_branch
 SYNC_BRANCHES: Dict[str, Tuple[str, str]] = {
-    # Main modules
     "vitality": ("main", "main"),
     "gulf": ("main", "master"),
     "lake": ("main", "master"),
@@ -152,8 +151,6 @@ SYNC_BRANCHES: Dict[str, Tuple[str, str]] = {
     "joycolor": ("main", "master"),
     "pvr_pro": ("main", "master"),
     "zing": ("main", "master"),
-
-    # Launcher submodules (end with _launcher)
     "vitality_launcher": ("main", "main"),
     "epic_launcher": ("main", "main"),
     "sand_launcher": ("main", "main"),
@@ -172,8 +169,6 @@ SYNC_BRANCHES: Dict[str, Tuple[str, str]] = {
     "tide_launcher": ("main", "main"),
     "Verve_Launcher": ("main", "main"),
     "lustrous": ("main", "main"),
-
-    # Common submodules (only those with server remote)
     "dvbservice": ("main", "master"),
     "presenterlib": ("main", "master"),
     "common_for_view": ("main", "master"),
@@ -186,12 +181,10 @@ SYNC_BRANCHES: Dict[str, Tuple[str, str]] = {
 
 
 def is_launcher_module(module_name: str) -> bool:
-    """Check if a module is a launcher module (ends with _launcher)."""
     return module_name.endswith("_launcher")
 
 
 def is_submodule_only(module_name: str) -> bool:
-    """Check if a module is a submodule-only module (no server remote)."""
     submodules_only = {
         "aars", "center_platform", "chmax", "stb_extend_module",
         "stb_message", "weather", "TosmartDataInterface", "twilight_sample"
@@ -200,35 +193,24 @@ def is_submodule_only(module_name: str) -> bool:
 
 
 def get_all_submodules() -> List[str]:
-    """Get list of all submodules (launcher modules + submodule-only modules)."""
     return [m for m in UPDATE_BRANCHES.keys()
             if is_launcher_module(m) or is_submodule_only(m)]
 
 
 def get_all_main_modules() -> List[str]:
-    """Get list of all main modules."""
     return [m for m in UPDATE_BRANCHES.keys()
             if not is_launcher_module(m) and not is_submodule_only(m)]
 
 
 def get_syncable_modules() -> List[str]:
-    """Get list of modules that have a server remote for sync."""
     return [m for m in UPDATE_BRANCHES.keys() if m in MODULES_WITH_SERVER]
 
 
 def get_update_branch(module_name: str) -> str:
-    """
-    Get the origin branch for update.py.
-    Returns the branch that local should be reset to from origin.
-    """
     return UPDATE_BRANCHES.get(module_name, "master")
 
 
 def get_sync_branches(module_name: str) -> Optional[Tuple[str, str]]:
-    """
-    Get the (server_branch, local_branch) tuple for sync.py.
-    Returns None if module cannot be synced (no server remote).
-    """
     if module_name not in SYNC_BRANCHES:
         return None
     return SYNC_BRANCHES[module_name]

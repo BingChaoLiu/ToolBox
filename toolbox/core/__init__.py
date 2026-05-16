@@ -59,7 +59,7 @@ class ToolboxCore:
         script_meta = next((s for s in self._scripts if s.name == name), None)
         if script_meta is None:
             script_meta = next((s for s in self._scripts if s.script_path.stem == name), None)
-        
+
         if script_meta is None:
             loop = asyncio.get_event_loop()
             from toolbox.core.events import ScriptFailed, ExecutionEnded
@@ -120,7 +120,14 @@ class ToolboxCore:
         if engine:
             engine.respond_confirm(step_id, confirmed)
 
+    def cleanup_engine(self, tid: int):
+        """流水线执行结束后清理对应的引擎引用。"""
+        self._active_engines.pop(tid, None)
+
     def cancel(self):
         from lib.cancel import request_cancel
         request_cancel()
-        # 注意：此处未清理 _active_engines，生产环境应在 ExecutionEnded 时清理
+        # 通知所有活跃的流水线引擎中止
+        for tid, engine in list(self._active_engines.items()):
+            engine.cancel()
+        self._active_engines.clear()

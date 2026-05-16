@@ -167,8 +167,18 @@ class ScriptMenu(ListView):
     def __init__(self, scripts, pipelines, on_select):
         self._on_select = on_select
         self._id_map = {}
+        self._scripts = {s.name: s for s in scripts}
+        self._pipelines = {p.name: p for p in pipelines}
+        self._all_scripts = list(scripts)
+        self._all_pipelines = list(pipelines)
+        items = self._build_items(scripts, pipelines)
+        super().__init__(*items)
+
+    def _build_items(self, scripts, pipelines, filter_text: str = "") -> list[ListItem]:
         items = []
+        self._id_map = {}
         idx = 0
+        ft = filter_text.lower()
 
         categories = {}
         for s in scripts:
@@ -192,9 +202,30 @@ class ScriptMenu(ListView):
                 items.append(ListItem(Label(f"  {p.name}"), id=safe_id))
                 idx += 1
 
-        super().__init__(*items)
-        self._scripts = {s.name: s for s in scripts}
-        self._pipelines = {p.name: p for p in pipelines}
+        return items
+
+    def filter(self, text: str):
+        """按关键词过滤脚本和流水线。"""
+        ft = text.lower().strip()
+        if not ft:
+            filtered_scripts = self._all_scripts
+            filtered_pipelines = self._all_pipelines
+        else:
+            filtered_scripts = [
+                s for s in self._all_scripts
+                if ft in s.name.lower() or ft in (s.description or "").lower()
+            ]
+            filtered_pipelines = [
+                p for p in self._all_pipelines
+                if ft in p.name.lower() or ft in (p.description or "").lower()
+            ]
+
+        new_items = self._build_items(filtered_scripts, filtered_pipelines, ft)
+        # 清空并重建列表
+        for child in list(self.children):
+            child.remove()
+        for item in new_items:
+            self.mount(item)
 
     def on_list_view_selected(self, event: ListView.Selected):
         item_id = event.item.id
@@ -224,6 +255,16 @@ class ToolBoxTUI(App):
         text-style: bold;
         dock: top;
         width: 100%;
+    }
+
+    /* 搜索框 */
+    #menu-search {
+        dock: top;
+        height: 3;
+        padding: 0 1;
+        border: none;
+        background: $surface-darken-1;
+        margin-bottom: 1;
     }
 
     /* 左侧侧边栏：包含脚本和流水线列表 */
@@ -388,6 +429,7 @@ class ToolBoxTUI(App):
         Binding("f12", "toggle_history", "执行记录"),
         Binding("ctrl+s", "export_log", "导出日志"),
         Binding("ctrl+c", "cancel_execution", "中止"),
+        Binding("slash", "focus_search", "搜索"),
     ]
 
     def __init__(self, core):
@@ -409,6 +451,7 @@ class ToolBoxTUI(App):
         yield Static(f"ToolBox v{__version__} — 开发者工作流利器", id="app-title")
         with Horizontal():
             with Vertical(id="sidebar"):
+                yield Input(placeholder="🔍 搜索脚本/流水线...", id="menu-search")
                 yield ScriptMenu(
                     self.core.list_scripts(),
                     self.core.list_pipelines(),
@@ -425,6 +468,7 @@ class ToolBoxTUI(App):
                         "   • [reverse]F9[/]  执行当前任务\n"
                         "   • [reverse]F11[/] 切换全屏视图\n"
                         "   • [reverse]F12[/] 展开/隐藏历史记录\n"
+                        "   • [reverse]/[/]    搜索脚本/流水线\n"
                         "   • [reverse]^S[/]  导出当前日志\n"
                         "   • [reverse]^C[/]  中止任务",
                         classes="form-title",
@@ -484,18 +528,27 @@ class ToolBoxTUI(App):
                     options = [(str(c), str(c)) for c in p.options]
                 elif p.options_from:
                     from toolbox.core.config_loader import resolve_value
-                    # 解析 options_from
-                    source = p.options_from.get("source")
-                    if source:
-                        resolved_options = resolve_value(source, self.core.get_config())
+                    # 支持两种格式：
+                    # 1. dict 格式: options_from: {source: "config:xxx", label_field: ..., value_field: ...}
+                    # 2. 简写格式: options_from: "config:xxx" (直接传字符串)
+                    if isinstance(p.options_from, str):
+                        # 简写格式
+                        resolved_options = resolve_value(p.options_from, self.core.get_config())
                         if isinstance(resolved_options, list):
-                            label_field = p.options_from.get("label_field")
-                            value_field = p.options_from.get("value_field")
                             for opt in resolved_options:
-                                if isinstance(opt, dict) and label_field and value_field:
-                                    options.append((str(opt.get(label_field, "")), str(opt.get(value_field, ""))))
-                                else:
-                                    options.append((str(opt), str(opt)))
+                                options.append((str(opt), str(opt)))
+                    elif isinstance(p.options_from, dict):
+                        source = p.options_from.get("source")
+                        if source:
+                            resolved_options = resolve_value(source, self.core.get_config())
+                            if isinstance(resolved_options, list):
+                                label_field = p.options_from.get("label_field")
+                                value_field = p.options_from.get("value_field")
+                                for opt in resolved_options:
+                                    if isinstance(opt, dict) and label_field and value_field:
+                                        options.append((str(opt.get(label_field, "")), str(opt.get(value_field, ""))))
+                                    else:
+                                        options.append((str(opt), str(opt)))
                 
                 # 确保 value 合法，如果 options 为空或 value 不在 options 中，使用 Select.NULL 或 Select.BLANK
                 # Textual 不同版本的 sentinel 名称不同 (NULL 或 BLANK)
@@ -666,6 +719,16 @@ class ToolBoxTUI(App):
                 on_select=self._on_menu_select,
             )
             menu.replace_with(new_menu)
+            # 清空搜索框
+            search = self.query_one("#menu-search")
+            search.value = ""
+        except Exception:
+            pass
+
+    def action_focus_search(self):
+        """聚焦到搜索框。"""
+        try:
+            self.query_one("#menu-search").focus()
         except Exception:
             pass
 
@@ -773,6 +836,14 @@ class ToolBoxTUI(App):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         try:
+            # 搜索框回车 → 聚焦到菜单
+            if event.input.id == "menu-search":
+                try:
+                    self.query_one(ScriptMenu).focus()
+                except Exception:
+                    pass
+                return
+
             ip = self.query_one(InteractionPanel)
             if ip._tid is None or ip._step_id is None:
                 return
@@ -785,6 +856,15 @@ class ToolBoxTUI(App):
                 ip.hide()
         except Exception:
             pass
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """搜索框输入变化时实时过滤菜单。"""
+        if event.input.id == "menu-search":
+            try:
+                menu = self.query_one(ScriptMenu)
+                menu.filter(event.value)
+            except Exception:
+                pass
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         """处理鼠标点击，实现右键粘贴功能。"""
@@ -853,7 +933,7 @@ class ToolBoxTUI(App):
                                 record.add_line(f"  {line}")
                         record.status = "failed"
                         self._update_history_item(record)
-                        self._update_output_if_viewing(tid, record)
+                        self._update_ouself._update_output_if_viewing(tid, record)
                     case PromptRequired(tid=e_tid, step_id=step_id, message=message, choices=choices):
                         record.pending_interaction = {
                             "type": "prompt",
@@ -890,6 +970,7 @@ class ToolBoxTUI(App):
                         record.status = "completed"
                         self._update_history_item(record)
                         self._update_output_if_viewing(tid, record)
+                        self.core.cleanup_engine(tid)
                         break
                     case ExecutionEnded():
                         try:
@@ -899,6 +980,7 @@ class ToolBoxTUI(App):
                         if record.status == "running":
                             record.status = "completed"
                             self._update_history_item(record)
+                        self.core.cleanup_engine(tid)
                         break
         except asyncio.CancelledError:
             record.add_line(f"\n-- {name} 已取消 --")
