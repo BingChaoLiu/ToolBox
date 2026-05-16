@@ -7,6 +7,7 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual import events
 from textual.widgets import (
     Footer,
     Header,
@@ -30,6 +31,78 @@ from toolbox.core.events import (
 )
 from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
+
+
+def _clipboard_copy(text: str):
+    from lib.clipboard import write as clip_write
+    clip_write(text)
+
+
+def _clipboard_read() -> str | None:
+    from lib.clipboard import read as clip_read
+    return clip_read()
+
+
+class ClipboardInput(Input):
+    """支持右键复制/粘贴的输入框。"""
+
+    async def _on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 3:
+            self._handle_right_click()
+            event.stop()
+            event._no_default_action = True  # 阻止 Input._on_mouse_down 再次执行
+            return
+        await super()._on_mouse_down(event)
+
+    def _handle_right_click(self):
+        try:
+            selected = self.selected_text
+            if selected:
+                _clipboard_copy(selected)
+                self.app.notify(f"已复制 {len(selected)} 个字符", title="复制成功")
+                return
+        except Exception:
+            pass
+
+        try:
+            text = _clipboard_read()
+            if text:
+                self.value = text.splitlines()[0].strip()
+                self.app.notify("已粘贴文本", title="粘贴成功")
+        except Exception:
+            pass
+
+
+class ClipboardTextArea(TextArea):
+    """支持右键复制/粘贴的文本区域。"""
+
+    async def _on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 3:
+            self._handle_right_click()
+            event.stop()
+            event._no_default_action = True  # 阻止 TextArea._on_mouse_down 再次执行
+            return
+        await super()._on_mouse_down(event)
+
+    def _handle_right_click(self):
+        try:
+            selected = self.selected_text
+            if selected:
+                _clipboard_copy(selected)
+                self.app.notify(f"已复制 {len(selected)} 个字符", title="复制成功")
+                return
+        except Exception:
+            pass
+
+        try:
+            text = _clipboard_read()
+            if text:
+                self.load_text(text)
+                self.scroll_cursor_visible()
+                self.app.notify(f"已粘贴 {len(text.splitlines())} 行文本", title="粘贴成功")
+        except Exception:
+            pass
+
 
 _next_widget_id = 0
 
@@ -139,7 +212,7 @@ class InteractionPanel(Static):
                 btn._choice_val = c
                 container.mount(btn)
         else:
-            inp = Input(placeholder="请输入...")
+            inp = ClipboardInput(placeholder="请输入...")
             inp.id = "prompt-input"
             self.mount(inp)
             inp.focus()
@@ -430,6 +503,7 @@ class ToolBoxTUI(App):
         Binding("ctrl+s", "export_log", "导出日志"),
         Binding("ctrl+c", "cancel_execution", "中止"),
         Binding("slash", "focus_search", "搜索"),
+        Binding("ctrl+q", "quit", "退出"),
     ]
 
     def __init__(self, core):
@@ -470,7 +544,8 @@ class ToolBoxTUI(App):
                         "   • [reverse]F12[/] 展开/隐藏历史记录\n"
                         "   • [reverse]/[/]    搜索脚本/流水线\n"
                         "   • [reverse]^S[/]  导出当前日志\n"
-                        "   • [reverse]^C[/]  中止任务",
+                        "   • [reverse]^C[/]  中止任务\n"
+                        "   • [reverse]^Q[/]  退出程序",
                         classes="form-title",
                     )
                 with VerticalScroll(id="output-container", classes="hidden"):
@@ -576,7 +651,7 @@ class ToolBoxTUI(App):
                 ))
             else:
                 if getattr(p, "multiline", False):
-                    widget = TextArea(
+                    widget = ClipboardTextArea(
                         text=str(p.default) if p.default is not None else "",
                         id=widget_id,
                         classes="form-input",
@@ -584,7 +659,7 @@ class ToolBoxTUI(App):
                     widget.styles.height = 10  # 多行文本框默认高度
                     fc.mount(widget)
                 else:
-                    fc.mount(Input(
+                    fc.mount(ClipboardInput(
                         value=str(p.default) if p.default is not None else "",
                         placeholder=p.description or "",
                         id=widget_id,
@@ -712,18 +787,22 @@ class ToolBoxTUI(App):
     def action_refresh_menu(self):
         self.core.reload()
         try:
-            menu = self.query_one(ScriptMenu)
+            sidebar = self.query_one("#sidebar")
+            old_menu = sidebar.query_one(ScriptMenu)
+            old_menu.remove()
+
             new_menu = ScriptMenu(
                 self.core.list_scripts(),
                 self.core.list_pipelines(),
                 on_select=self._on_menu_select,
             )
-            menu.replace_with(new_menu)
-            # 清空搜索框
+            sidebar.mount(new_menu)
+
             search = self.query_one("#menu-search")
             search.value = ""
-        except Exception:
-            pass
+            self.notify("菜单已刷新", title="刷新成功")
+        except Exception as e:
+            self.notify(f"刷新失败: {e}", title="错误", severity="error")
 
     def action_focus_search(self):
         """聚焦到搜索框。"""
@@ -865,33 +944,6 @@ class ToolBoxTUI(App):
                 menu.filter(event.value)
             except Exception:
                 pass
-
-    def on_mouse_down(self, event: events.MouseDown) -> None:
-        """处理鼠标点击，实现右键粘贴功能。"""
-        if event.button == 2:  # 右键点击
-            result = self.get_widget_at(event.screen_x, event.screen_y)
-            widget = result[0] if result else None
-            
-            if isinstance(widget, (Input, TextArea)):
-                from lib.clipboard import read as clip_read
-                try:
-                    text = clip_read()
-                    if text:
-                        lines = text.splitlines()
-                        num_lines = len(lines)
-                        if isinstance(widget, Input):
-                            # Input 仅取第一行并去掉首尾空白
-                            widget.value = lines[0].strip() if num_lines > 0 else ""
-                        else:
-                            # TextArea 支持多行
-                            widget.load_text(text)
-                            widget.scroll_cursor_visible()
-                        
-                        # 显示粘贴成功提示
-                        self.notify(f"已从剪切板粘贴 {num_lines} 行文本", title="粘贴成功")
-                        widget.focus()
-                except Exception:
-                    pass
 
     # ── Event consumption (background task) ──────────────────────
 
