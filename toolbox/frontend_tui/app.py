@@ -32,6 +32,7 @@ from toolbox.core.events import (
 )
 from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
+from toolbox.frontend_tui.themes import get_theme_css, get_theme_names, DEFAULT_THEME
 
 from lib.formatter import format_line
 
@@ -316,7 +317,7 @@ class ToolBoxTUI(App):
     TITLE = "ToolBox"
 
     # CSS 样式定义：调整此处可以改变软件的视觉外观
-    CSS = """
+    _BASE_CSS = """
     /* 基础屏幕背景 */
     Screen {
         background: $surface;
@@ -576,6 +577,14 @@ class ToolBoxTUI(App):
         self._search_query: str | None = None
         self._search_matches: list[int] = []
         self._search_current_idx: int = 0
+        self._current_theme: str = DEFAULT_THEME
+        self._theme_overrides: str = ""
+        self._base_css = self._BASE_CSS
+
+    @property
+    def CSS(self):
+        """Dynamic CSS property that combines base styles with theme overrides."""
+        return self._base_css + "\n" + self._theme_overrides
 
     @property
     def _is_busy(self):
@@ -854,6 +863,24 @@ class ToolBoxTUI(App):
                 title_widget.update("ToolBox — 开发者工作流利器")
         except Exception:
             pass
+
+    def _apply_theme(self, theme_name: str):
+        """Apply a named theme by refreshing the CSS string."""
+        if theme_name not in get_theme_names():
+            return
+        self._current_theme = theme_name
+        self._theme_overrides = get_theme_css(theme_name)
+        try:
+            self.refresh_css()
+        except Exception:
+            pass
+
+    def on_mount(self) -> None:
+        """App mounted — load theme from config."""
+        from lib.config import get_config
+        theme = get_config("ui.theme", DEFAULT_THEME)
+        if theme in get_theme_names():
+            self._apply_theme(theme)
 
     # ── Actions ──────────────────────────────────────────────────
 
