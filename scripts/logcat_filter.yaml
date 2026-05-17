@@ -1,0 +1,29 @@
+# scripts/logcat_filter.yaml
+name: Logcat 日志过滤
+description: 实时捕获 adb logcat 输出，按关键词/级别过滤着色显示
+category: Android
+
+params:
+  - name: filter
+    label: 过滤关键词
+    type: text
+    description: 按关键词过滤日志
+
+  - name: level
+    label: 最低日志级别
+    type: choice
+    options:
+      - V
+      - D
+      - I
+      - W
+      - E
+      - F
+    default: V
+
+  - name: serial
+    label: 设备序列号
+    type: text
+    description: 可选，指定设备序列号
+
+outputs: []
