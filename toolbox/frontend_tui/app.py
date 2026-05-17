@@ -32,7 +32,12 @@ from toolbox.core.events import (
 )
 from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
-from toolbox.frontend_tui.themes import get_theme_css, get_theme_names, DEFAULT_THEME
+from toolbox.frontend_tui.themes import (
+    TOOLBOX_THEMES,
+    get_theme_names,
+    get_theme_display_name,
+    DEFAULT_THEME,
+)
 from toolbox.frontend_tui.commands import (
     ScriptCommandProvider,
     PipelineCommandProvider,
@@ -335,7 +340,7 @@ class ToolBoxTUI(App):
     TITLE = "ToolBox"
 
     # CSS 样式定义：调整此处可以改变软件的视觉外观
-    _BASE_CSS = """
+    CSS = """
     /* 基础屏幕背景 */
     Screen {
         background: $surface;
@@ -586,7 +591,6 @@ class ToolBoxTUI(App):
     }
 
     BINDINGS = [
-        Binding("ctrl+p", "command_palette", "命令面板"),
         Binding("f5", "refresh_menu", "刷新菜单"),
         Binding("f9", "execute", "执行"),
         Binding("f11", "toggle_fullscreen", "全屏输出"),
@@ -614,13 +618,6 @@ class ToolBoxTUI(App):
         self._search_matches: list[int] = []
         self._search_current_idx: int = 0
         self._current_theme: str = DEFAULT_THEME
-        self._theme_overrides: str = ""
-        self._base_css = self._BASE_CSS
-
-    @property
-    def CSS(self):
-        """Dynamic CSS property that combines base styles with theme overrides."""
-        return self._base_css + "\n" + self._theme_overrides
 
     @property
     def _is_busy(self):
@@ -979,15 +976,11 @@ class ToolBoxTUI(App):
             pass
 
     def _apply_theme(self, theme_name: str):
-        """Apply a named theme by refreshing the CSS string."""
+        """Apply a named theme using Textual's built-in theme system."""
         if theme_name not in get_theme_names():
             return
         self._current_theme = theme_name
-        self._theme_overrides = get_theme_css(theme_name)
-        try:
-            self.refresh_css()
-        except Exception:
-            pass
+        self.theme = theme_name
 
     def action_cycle_theme(self):
         """Ctrl+T 切换主题。"""
@@ -999,12 +992,17 @@ class ToolBoxTUI(App):
             next_idx = (idx + 1) % len(names)
             next_theme = names[next_idx]
             self._apply_theme(next_theme)
-            self.notify(f"主题: {next_theme}", title="主题切换")
+            display = get_theme_display_name(next_theme)
+            self.notify(f"主题: {display}", title="主题切换")
         except (ValueError, IndexError):
             self._apply_theme(names[0])
 
     def on_mount(self) -> None:
-        """App mounted — load theme from config."""
+        """App mounted — register custom themes and load from config."""
+        # 注册自定义主题
+        for theme in TOOLBOX_THEMES.values():
+            self.register_theme(theme)
+        # 从配置加载主题
         from lib.config import get_config
         theme = get_config("ui.theme", DEFAULT_THEME)
         if theme in get_theme_names():

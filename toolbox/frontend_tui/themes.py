@@ -1,72 +1,60 @@
 # toolbox/frontend_tui/themes.py
-"""主题定义 — 预设颜色方案。"""
+"""主题定义 — 使用 Textual 原生 Theme API 注册预设主题。"""
 from __future__ import annotations
 
-# 每个主题是一组 Textual CSS 变量覆盖
-THEMES: dict[str, dict[str, str]] = {
-    "dark": {
-        # 默认暗色 (Textual 默认，留空表示不覆盖)
-    },
-    "light": {
-        "background": "#f5f5f5",
-        "surface": "#ffffff",
-        "surface-darken-1": "#eeeeee",
-        "surface-darken-2": "#e0e0e0",
-        "surface-darken-3": "#d0d0d0",
-        "surface-lighten-1": "#fafafa",
-        "primary": "#1565c0",
-        "primary-darken-1": "#0d47a1",
-        "primary-darken-2": "#0a3880",
-        "primary-darken-3": "#082e66",
-        "secondary": "#00897b",
-        "text": "#1a1a1a",
-        "text-muted": "#666666",
-        "success": "#2e7d32",
-        "warning": "#e65100",
-        "error": "#c62828",
-    },
-    "high-contrast": {
-        "background": "#000000",
-        "surface": "#0a0a0a",
-        "surface-darken-1": "#141414",
-        "surface-darken-2": "#1e1e1e",
-        "surface-darken-3": "#282828",
-        "surface-lighten-1": "#050505",
-        "primary": "#4fc3f7",
-        "primary-darken-1": "#29b6f6",
-        "primary-darken-2": "#039be5",
-        "primary-darken-3": "#0277bd",
-        "secondary": "#69f0ae",
-        "text": "#ffffff",
-        "text-muted": "#b0b0b0",
-        "success": "#76ff03",
-        "warning": "#ffab00",
-        "error": "#ff1744",
-    },
+from textual.theme import Theme
+
+# ── 主题定义 ──────────────────────────────────────────────
+# Textual Theme 构造函数:
+#   Theme(name, primary, secondary=None, warning=None, error=None,
+#         success=None, accent=None, foreground=None, background=None,
+#         surface=None, panel=None, dark=True, variables={})
+
+TOOLBOX_THEMES: dict[str, Theme] = {
+    "toolbox-light": Theme(
+        name="toolbox-light",
+        primary="#1565c0",
+        secondary="#00897b",
+        warning="#e65100",
+        error="#c62828",
+        success="#2e7d32",
+        foreground="#1a1a1a",
+        background="#f5f5f5",
+        surface="#ffffff",
+        panel="#eeeeee",
+        dark=False,
+    ),
+    "toolbox-high-contrast": Theme(
+        name="toolbox-high-contrast",
+        primary="#4fc3f7",
+        secondary="#69f0ae",
+        warning="#ffab00",
+        error="#ff1744",
+        success="#76ff03",
+        foreground="#ffffff",
+        background="#000000",
+        surface="#0a0a0a",
+        panel="#141414",
+        dark=True,
+    ),
 }
 
-DEFAULT_THEME = "dark"
+DEFAULT_THEME = "textual-dark"
 
-AVAILABLE_THEMES = list(THEMES.keys())
+AVAILABLE_THEMES = ["textual-dark", "toolbox-light", "toolbox-high-contrast"]
 
-
-def get_theme_css(theme_name: str) -> str:
-    """Generate CSS that overrides Textual variables for the given theme.
-
-    Returns a CSS rule that sets Textual CSS variables ($surface, $primary, etc.)
-    on the Screen element.
-    """
-    theme = THEMES.get(theme_name, {})
-    if not theme:
-        return ""
-    lines = []
-    lines.append("Screen {")
-    for var, value in theme.items():
-        lines.append(f"    ${var}: {value};")
-    lines.append("}")
-    return "\n".join(lines)
+THEME_DISPLAY_NAMES: dict[str, str] = {
+    "textual-dark": "暗色",
+    "toolbox-light": "亮色",
+    "toolbox-high-contrast": "高对比度",
+}
 
 
 def get_theme_names() -> list[str]:
     """Return list of available theme names."""
     return AVAILABLE_THEMES
+
+
+def get_theme_display_name(theme_name: str) -> str:
+    """Return user-friendly display name for a theme."""
+    return THEME_DISPLAY_NAMES.get(theme_name, theme_name)
