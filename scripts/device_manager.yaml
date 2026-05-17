@@ -1,0 +1,29 @@
+# scripts/device_manager.yaml
+name: ADB 设备管理
+description: 管理连接设备 — 列出设备、安装/卸载 APK、推拉文件、截图
+category: Android
+
+params:
+  - name: operation
+    label: 操作类型
+    type: choice
+    options:
+      - list
+      - install
+      - uninstall
+      - push
+      - pull
+      - screenshot
+    default: list
+
+  - name: target
+    label: 目标路径/包名
+    type: text
+    description: APK 路径、包名、或 本地:远程 路径
+
+  - name: serial
+    label: 设备序列号
+    type: text
+    description: 可选，指定设备序列号
+
+outputs: []
