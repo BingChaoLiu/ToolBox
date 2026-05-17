@@ -516,6 +516,15 @@ class ToolBoxTUI(App):
         background: $surface-darken-3;
     }
 
+    /* 历史统计摘要 */
+    #history-stats {
+        padding: 0 2;
+        height: auto;
+        color: $text-muted;
+        text-style: italic;
+        border-bottom: solid $surface;
+    }
+
     /* 单个历史条目样式 */
     .history-item {
         padding: 1 2;
@@ -660,6 +669,7 @@ class ToolBoxTUI(App):
                 yield InteractionPanel()
             with VerticalScroll(id="history-panel", classes="hidden"):
                 yield Static("📜 执行历史", id="history-title")
+                yield Static("", id="history-stats")
         yield Footer()
 
     # ── Menu & form ──────────────────────────────────────────────
@@ -877,6 +887,23 @@ class ToolBoxTUI(App):
     def _update_history_item(self, record: ExecutionRecord):
         if record.item_widget:
             record.item_widget.refresh_display(record)
+        self._update_history_stats()
+
+    def _update_history_stats(self):
+        """更新历史面板顶部的统计摘要。"""
+        records = list(self._records.values())
+        if not records:
+            return
+        total = len(records)
+        completed = sum(1 for r in records if r.status == "completed")
+        failed = sum(1 for r in records if r.status == "failed")
+        durations = [r.duration for r in records if r.duration > 0]
+        avg_dur = sum(durations) / len(durations) if durations else 0
+        stats_text = f"总计: {total} | ✅ {completed} ❌ {failed} | 平均耗时: {avg_dur:.1f}s"
+        try:
+            self.query_one("#history-stats", Static).update(stats_text)
+        except Exception:
+            pass
 
     def _refresh_status(self):
         try:
@@ -1069,6 +1096,7 @@ class ToolBoxTUI(App):
             if not panel.has_class("hidden"):
                 self._load_favorites()
                 self._sort_history()
+                self._update_history_stats()
         except Exception:
             pass
 
