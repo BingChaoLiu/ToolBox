@@ -431,6 +431,31 @@ class ToolBoxTUI(App):
         height: 1fr;
     }
 
+    /* 输出面板工具栏 */
+    #output-toolbar {
+        height: 3;
+        padding: 0 1;
+        background: $surface-darken-2;
+        border-bottom: solid $surface;
+    }
+
+    #output-toolbar Button {
+        min-width: 0;
+        height: 1;
+        margin-right: 1;
+        padding: 0 2;
+        border: none;
+        background: transparent;
+    }
+
+    #output-toolbar Button:hover {
+        background: $primary-darken-2;
+    }
+
+    #output-toolbar Button:focus {
+        background: $primary;
+    }
+
     /* 右侧历史记录面板 */
     #history-panel {
         width: 32;
@@ -554,6 +579,13 @@ class ToolBoxTUI(App):
                         classes="form-title",
                     )
                 with Vertical(id="output-container", classes="hidden"):
+                    yield Horizontal(
+                        Button("🔍", id="btn-search", variant="default"),
+                        Button("📋 复制", id="btn-copy", variant="default"),
+                        Button("💾 导出", id="btn-export", variant="default"),
+                        Button("🗑 清屏", id="btn-clear", variant="default"),
+                        id="output-toolbar",
+                    )
                     yield RichLog(id="output-panel", highlight=True, markup=True)
                 yield InteractionPanel()
             with VerticalScroll(id="history-panel", classes="hidden"):
@@ -896,29 +928,58 @@ class ToolBoxTUI(App):
         self._refresh_status()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn_id = event.button.id
+
+        # 工具栏按钮
+        if btn_id and btn_id.startswith("btn-"):
+            self._on_toolbar_button(btn_id)
+            return
+
+        # 交互面板按钮
         try:
             ip = self.query_one(InteractionPanel)
             if ip._tid is None or ip._step_id is None:
                 return
-            
-            btn_id = event.button.id
+
             if btn_id == "confirm-yes":
                 self.core.respond_confirm(ip._tid, ip._step_id, True)
             elif btn_id == "confirm-no":
                 self.core.respond_confirm(ip._tid, ip._step_id, False)
-            elif btn_id.startswith("choice-"):
+            elif btn_id and btn_id.startswith("choice-"):
                 val = getattr(event.button, "_choice_val", "")
                 self.core.respond_prompt(ip._tid, ip._step_id, val)
             else:
                 return
 
-            # 清理状态
             record = self._records.get(ip._tid)
             if record:
                 record.pending_interaction = None
             ip.hide()
         except Exception:
             pass
+
+    def _on_toolbar_button(self, btn_id: str):
+        record = self._records.get(self._current_view_tid) if self._current_view_tid else None
+        if btn_id == "btn-search":
+            self.action_toggle_search()
+        elif btn_id == "btn-copy":
+            if record and record.get_line_count() > 0:
+                _clipboard_copy(record.get_text())
+                self.notify("已复制到剪贴板")
+        elif btn_id == "btn-export":
+            self.action_export_log()
+        elif btn_id == "btn-clear":
+            if record:
+                record.lines.clear()
+                self._lines_displayed = 0
+                try:
+                    self.query_one("#output-panel", RichLog).clear()
+                except Exception:
+                    pass
+
+    def action_toggle_search(self):
+        """Ctrl+F 切换搜索栏（Task 4 完整实现）。"""
+        pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         try:
