@@ -177,7 +177,9 @@ class HistoryItem(ListItem):
     def refresh_display(self, record: ExecutionRecord):
         icon = _STATUS_ICONS.get(record.status, "•")
         time_str = record.timestamp.strftime("%H:%M:%S")
-        self.label.update(f"{icon} {record.name} [dim]({time_str})[/]")
+        star = "⭐ " if record.favorited else ""
+        dur = f" {record.duration:.1f}s" if record.duration > 0 else ""
+        self.label.update(f"{star}{icon} {record.name} [dim]({time_str}{dur})[/]")
         for cls in ["status-running", "status-completed", "status-failed", "status-cancelled"]:
             if self.has_class(cls) and cls != f"status-{record.status}":
                 self.remove_class(cls)
@@ -187,6 +189,15 @@ class HistoryItem(ListItem):
         app = self.app
         if isinstance(app, ToolBoxTUI):
             app._select_record(self._record_tid)
+
+    async def _on_mouse_down(self, event: events.MouseDown) -> None:
+        if event.button == 3:  # Right-click → toggle favorite
+            app = self.app
+            if isinstance(app, ToolBoxTUI):
+                app._toggle_favorite(self._record_tid)
+            event.prevent_default()
+            return
+        await super()._on_mouse_down(event)
 
 
 class ResourceMonitor(Static):
@@ -880,6 +891,66 @@ class ToolBoxTUI(App):
         except Exception:
             pass
 
+    def _toggle_favorite(self, tid: int):
+        record = self._records.get(tid)
+        if not record:
+            return
+        record.favorited = not record.favorited
+        if record.item_widget:
+            record.item_widget.refresh_display(record)
+        self._save_favorites()
+        self._sort_history()
+
+    def _save_favorites(self):
+        """Persist favorite script names to config."""
+        try:
+            import yaml
+            from lib.config import _CONFIG_PATH
+            config = {}
+            if _CONFIG_PATH.exists():
+                with open(_CONFIG_PATH, encoding="utf-8") as f:
+                    config = yaml.safe_load(f) or {}
+            fav_names = list({
+                r.name for r in self._records.values() if r.favorited
+            })
+            config.setdefault("ui", {})["favorites"] = fav_names
+            with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+                yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+        except Exception:
+            pass
+
+    def _load_favorites(self):
+        """Load favorite script names from config and mark matching records."""
+        try:
+            from lib.config import get_config
+            fav_names = get_config("ui.favorites", [])
+            if not fav_names:
+                return
+            fav_set = set(fav_names)
+            for record in self._records.values():
+                if record.name in fav_set:
+                    record.favorited = True
+                    if record.item_widget:
+                        record.item_widget.refresh_display(record)
+        except Exception:
+            pass
+
+    def _sort_history(self):
+        """Re-sort history panel: favorites first, then by timestamp desc."""
+        try:
+            panel = self.query_one("#history-panel")
+            items = [child for child in panel.children if isinstance(child, HistoryItem)]
+            def sort_key(item: HistoryItem):
+                record = self._records.get(item._record_tid)
+                if not record:
+                    return (False, datetime.min)
+                return (not record.favorited, -record.timestamp.timestamp())
+            items.sort(key=sort_key)
+            for item in items:
+                panel.move_child(item, after=-1)
+        except Exception:
+            pass
+
     def _apply_theme(self, theme_name: str):
         """Apply a named theme by refreshing the CSS string."""
         if theme_name not in get_theme_names():
@@ -975,6 +1046,7 @@ class ToolBoxTUI(App):
             item = HistoryItem(record)
             record.item_widget = item
             history_panel.mount(item)
+            self._sort_history()
             self._select_record(tid)
         except Exception:
             pass
@@ -992,7 +1064,11 @@ class ToolBoxTUI(App):
 
     def action_toggle_history(self):
         try:
-            self.query_one("#history-panel").toggle_class("hidden")
+            panel = self.query_one("#history-panel")
+            panel.toggle_class("hidden")
+            if not panel.has_class("hidden"):
+                self._load_favorites()
+                self._sort_history()
         except Exception:
             pass
 
