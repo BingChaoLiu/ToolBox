@@ -35,7 +35,19 @@ def core():
 
 def _output_text(app) -> str:
     widget = app.query_one("#output-panel")
-    return widget.content if isinstance(widget.content, str) else str(widget.content)
+    # RichLog stores content in 'lines' attribute as Strip objects
+    if hasattr(widget, 'lines'):
+        lines = []
+        for line in widget.lines:
+            # Convert Strip/Segment to plain text
+            text = ''.join(segment.text for segment in line._segments)
+            lines.append(text)
+        return ''.join(lines)
+    # Fallback for Static widget
+    elif hasattr(widget, 'content'):
+        return widget.content if isinstance(widget.content, str) else str(widget.content)
+    else:
+        return str(widget)
 
 
 # ── Basic UI ─────────────────────────────────────────────────────

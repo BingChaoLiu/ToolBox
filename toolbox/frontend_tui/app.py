@@ -20,6 +20,7 @@ from textual.widgets import (
     Checkbox,
     Button,
     TextArea,
+    RichLog,
 )
 from textual.containers import Horizontal, Vertical, VerticalScroll
 
@@ -31,6 +32,8 @@ from toolbox.core.events import (
 )
 from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
+
+from lib.formatter import format_line
 
 
 def _clipboard_copy(text: str):
@@ -421,10 +424,11 @@ class ToolBoxTUI(App):
         margin: 0;
     }
 
-    /* 输出文本面板 */
+    /* 输出面板 (RichLog) */
     #output-panel {
         padding: 1 2;
         color: $text;
+        height: 1fr;
     }
 
     /* 右侧历史记录面板 */
@@ -516,6 +520,7 @@ class ToolBoxTUI(App):
         self._task_seq = 0
         self._records: dict[int, ExecutionRecord] = {}
         self._current_view_tid: int | None = None
+        self._lines_displayed: int = 0
 
     @property
     def _is_busy(self):
@@ -548,8 +553,8 @@ class ToolBoxTUI(App):
                         "   • [reverse]^Q[/]  退出程序",
                         classes="form-title",
                     )
-                with VerticalScroll(id="output-container", classes="hidden"):
-                    yield Static(id="output-panel")
+                with Vertical(id="output-container", classes="hidden"):
+                    yield RichLog(id="output-panel", highlight=True, markup=True)
                 yield InteractionPanel()
             with VerticalScroll(id="history-panel", classes="hidden"):
                 yield Static("📜 执行历史", id="history-title")
@@ -723,7 +728,11 @@ class ToolBoxTUI(App):
         self._show_output()
 
         try:
-            self.query_one("#output-panel").update(record.get_text())
+            rich_log = self.query_one("#output-panel", RichLog)
+            rich_log.clear()
+            for line in record.lines:
+                rich_log.write(format_line(line))
+            self._lines_displayed = len(record.lines)
 
             # 更新交互面板
             ip = self.query_one(InteractionPanel)
@@ -744,9 +753,9 @@ class ToolBoxTUI(App):
                     else:
                         child.remove_class("selected")
 
-            if record.status == "running":
+            if record.status in ("running", "completed"):
                 try:
-                    self.query_one("#output-container").scroll_end(animate=False)
+                    rich_log.scroll_end(animate=False)
                 except Exception:
                     pass
         except Exception:
@@ -756,12 +765,10 @@ class ToolBoxTUI(App):
         if self._current_view_tid != tid:
             return
         try:
-            self.query_one("#output-panel").update(record.get_text())
-            if record.status == "running":
-                try:
-                    self.query_one("#output-container").scroll_end(animate=False)
-                except Exception:
-                    pass
+            rich_log = self.query_one("#output-panel", RichLog)
+            for line in record.lines[self._lines_displayed:]:
+                rich_log.write(format_line(line))
+            self._lines_displayed = len(record.lines)
         except Exception:
             pass
 
@@ -985,7 +992,7 @@ class ToolBoxTUI(App):
                                 record.add_line(f"  {line}")
                         record.status = "failed"
                         self._update_history_item(record)
-                        self._update_ouself._update_output_if_viewing(tid, record)
+                        self._update_output_if_viewing(tid, record)
                     case PromptRequired(tid=e_tid, step_id=step_id, message=message, choices=choices):
                         record.pending_interaction = {
                             "type": "prompt",
