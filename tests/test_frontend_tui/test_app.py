@@ -83,6 +83,22 @@ class TestScriptMenuIdMapping:
         assert name == "崩溃分析流水线"
 
 
+class TestExecutionRecordFields:
+    def test_default_values(self):
+        from toolbox.frontend_tui.app import ExecutionRecord
+        record = ExecutionRecord(1, "test")
+        assert record.favorited is False
+        assert record.duration == 0.0
+        assert record.status == "running"
+
+    def test_add_line(self):
+        from toolbox.frontend_tui.app import ExecutionRecord
+        record = ExecutionRecord(1, "test")
+        record.add_line("hello")
+        assert record.get_line_count() == 1
+        assert record.get_text() == "hello"
+
+
 class TestInitialState:
     """测试 App 初始状态（不启动 Textual app）。"""
 

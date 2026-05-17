@@ -147,6 +147,8 @@ class ExecutionRecord:
         self.status = "running"
         self.item_widget: HistoryItem | None = None
         self.pending_interaction: dict | None = None
+        self.favorited: bool = False
+        self.duration: float = 0.0
 
     def add_line(self, line: str):
         self.lines.append(line)
@@ -1258,6 +1260,7 @@ class ToolBoxTUI(App):
                             for k, v in out.items():
                                 record.add_line(f"  {k}: {v}")
                         record.status = "completed"
+                        record.duration = duration
                         self._update_history_item(record)
                         self._update_output_if_viewing(tid, record)
                     case ScriptFailed(error=error, traceback=tb):
@@ -1303,6 +1306,7 @@ class ToolBoxTUI(App):
                             pass
                         record.add_line(f"\n-- {name} 流水线完成 --")
                         record.status = "completed"
+                        record.duration = 0.0
                         self._update_history_item(record)
                         self._update_output_if_viewing(tid, record)
                         self.core.cleanup_engine(tid)
