@@ -558,6 +558,7 @@ class ToolBoxTUI(App):
         Binding("f12", "toggle_history", "执行记录"),
         Binding("ctrl+s", "export_log", "导出日志"),
         Binding("ctrl+c", "cancel_execution", "中止"),
+        Binding("ctrl+t", "cycle_theme", "切换主题"),
         Binding("slash", "focus_search", "搜索"),
         Binding("ctrl+f", "toggle_search", "搜索输出"),
         Binding("ctrl+q", "quit", "退出"),
@@ -874,6 +875,20 @@ class ToolBoxTUI(App):
             self.refresh_css()
         except Exception:
             pass
+
+    def action_cycle_theme(self):
+        """Ctrl+T 切换主题。"""
+        names = get_theme_names()
+        if not names:
+            return
+        try:
+            idx = names.index(self._current_theme)
+            next_idx = (idx + 1) % len(names)
+            next_theme = names[next_idx]
+            self._apply_theme(next_theme)
+            self.notify(f"主题: {next_theme}", title="主题切换")
+        except (ValueError, IndexError):
+            self._apply_theme(names[0])
 
     def on_mount(self) -> None:
         """App mounted — load theme from config."""
