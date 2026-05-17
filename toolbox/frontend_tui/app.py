@@ -33,6 +33,11 @@ from toolbox.core.events import (
 from toolbox.core.events import ScriptMeta
 from toolbox.frontend_base import FrontendBase
 from toolbox.frontend_tui.themes import get_theme_css, get_theme_names, DEFAULT_THEME
+from toolbox.frontend_tui.commands import (
+    ScriptCommandProvider,
+    PipelineCommandProvider,
+    HistoryCommandProvider,
+)
 
 from lib.formatter import format_line
 
@@ -551,7 +556,15 @@ class ToolBoxTUI(App):
     }
     """
 
+    # Command Palette providers (Ctrl+P)
+    COMMANDS = {
+        ScriptCommandProvider,
+        PipelineCommandProvider,
+        HistoryCommandProvider,
+    }
+
     BINDINGS = [
+        Binding("ctrl+p", "command_palette", "命令面板"),
         Binding("f5", "refresh_menu", "刷新菜单"),
         Binding("f9", "execute", "执行"),
         Binding("f11", "toggle_fullscreen", "全屏输出"),
