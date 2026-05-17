@@ -456,6 +456,32 @@ class ToolBoxTUI(App):
         background: $primary;
     }
 
+    /* 搜索栏 */
+    #search-bar {
+        dock: top;
+        height: 3;
+        padding: 0 1;
+        background: $primary-darken-3;
+    }
+
+    #search-input {
+        width: 1fr;
+        height: 1;
+    }
+
+    #search-count {
+        width: auto;
+        padding: 0 1;
+        color: $text-muted;
+    }
+
+    #search-close-btn {
+        min-width: 3;
+        height: 1;
+        border: none;
+        background: transparent;
+    }
+
     /* 右侧历史记录面板 */
     #history-panel {
         width: 32;
@@ -532,6 +558,7 @@ class ToolBoxTUI(App):
         Binding("ctrl+s", "export_log", "导出日志"),
         Binding("ctrl+c", "cancel_execution", "中止"),
         Binding("slash", "focus_search", "搜索"),
+        Binding("ctrl+f", "toggle_search", "搜索输出"),
         Binding("ctrl+q", "quit", "退出"),
     ]
 
@@ -546,6 +573,9 @@ class ToolBoxTUI(App):
         self._records: dict[int, ExecutionRecord] = {}
         self._current_view_tid: int | None = None
         self._lines_displayed: int = 0
+        self._search_query: str | None = None
+        self._search_matches: list[int] = []
+        self._search_current_idx: int = 0
 
     @property
     def _is_busy(self):
@@ -579,6 +609,10 @@ class ToolBoxTUI(App):
                         classes="form-title",
                     )
                 with Vertical(id="output-container", classes="hidden"):
+                    with Horizontal(id="search-bar", classes="hidden"):
+                        yield Input(placeholder="搜索...", id="search-input")
+                        yield Label("", id="search-count")
+                        yield Button("✕", id="search-close-btn", variant="default")
                     yield Horizontal(
                         Button("🔍", id="btn-search", variant="default"),
                         Button("📋 复制", id="btn-copy", variant="default"),
@@ -799,7 +833,7 @@ class ToolBoxTUI(App):
         try:
             rich_log = self.query_one("#output-panel", RichLog)
             for line in record.lines[self._lines_displayed:]:
-                rich_log.write(format_line(line))
+                rich_log.write(format_line(line, highlight=self._search_query))
             self._lines_displayed = len(record.lines)
         except Exception:
             pass
@@ -930,6 +964,11 @@ class ToolBoxTUI(App):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
 
+        # 搜索关闭按钮
+        if btn_id == "search-close-btn":
+            self._close_search()
+            return
+
         # 工具栏按钮
         if btn_id and btn_id.startswith("btn-"):
             self._on_toolbar_button(btn_id)
@@ -978,8 +1017,96 @@ class ToolBoxTUI(App):
                     pass
 
     def action_toggle_search(self):
-        """Ctrl+F 切换搜索栏（Task 4 完整实现）。"""
-        pass
+        """Ctrl+F 切换搜索栏。"""
+        try:
+            bar = self.query_one("#search-bar")
+            if bar.has_class("hidden"):
+                bar.remove_class("hidden")
+                self.query_one("#search-input", Input).focus()
+            else:
+                self._close_search()
+        except Exception:
+            pass
+
+    def _close_search(self):
+        """关闭搜索栏并恢复无高亮显示。"""
+        try:
+            self.query_one("#search-bar").add_class("hidden")
+            inp = self.query_one("#search-input", Input)
+            inp.value = ""
+        except Exception:
+            pass
+        self._search_query = None
+        self._search_matches = []
+        self._search_current_idx = 0
+        # 重建无高亮的内容
+        self._rebuild_output()
+
+    def _rebuild_output(self):
+        """根据当前搜索状态重建 RichLog 内容。"""
+        record = self._records.get(self._current_view_tid) if self._current_view_tid else None
+        if not record:
+            return
+        try:
+            rich_log = self.query_one("#output-panel", RichLog)
+            rich_log.clear()
+            query = self._search_query
+            self._search_matches = []
+            if query:
+                ql = query.lower()
+                for i, line in enumerate(record.lines):
+                    if ql in line.lower():
+                        self._search_matches.append(i)
+                    rich_log.write(format_line(line, highlight=query))
+            else:
+                for line in record.lines:
+                    rich_log.write(format_line(line))
+            self._lines_displayed = len(record.lines)
+            # 更新计数
+            self._update_search_count()
+            if self._search_matches:
+                self._scroll_to_match(0)
+        except Exception:
+            pass
+
+    def _update_search_count(self):
+        """更新搜索计数标签。"""
+        try:
+            label = self.query_one("#search-count", Label)
+            total = len(self._search_matches)
+            if total == 0:
+                label.update("0/0")
+            else:
+                label.update(f"{self._search_current_idx + 1}/{total}")
+        except Exception:
+            pass
+
+    def _scroll_to_match(self, idx: int):
+        """滚动到第 idx 个匹配项。"""
+        if not self._search_matches or idx < 0 or idx >= len(self._search_matches):
+            return
+        self._search_current_idx = idx
+        line_idx = self._search_matches[idx]
+        try:
+            rich_log = self.query_one("#output-panel", RichLog)
+            # RichLog 每个 write() 创建一个子 widget
+            children = list(rich_log.query().children)
+            if line_idx < len(children):
+                rich_log.scroll_to_widget(children[line_idx], animate=False)
+        except Exception:
+            pass
+        self._update_search_count()
+
+    def _search_navigate(self, direction: int):
+        """搜索导航：direction=1 下一个，direction=-1 上一个。"""
+        if not self._search_matches:
+            return
+        new_idx = self._search_current_idx + direction
+        if new_idx < 0:
+            new_idx = len(self._search_matches) - 1
+        elif new_idx >= len(self._search_matches):
+            new_idx = 0
+        self._scroll_to_match(new_idx)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         try:
@@ -989,6 +1116,11 @@ class ToolBoxTUI(App):
                     self.query_one(ScriptMenu).focus()
                 except Exception:
                     pass
+                return
+
+            # 输出搜索框回车 → 下一个匹配
+            if event.input.id == "search-input":
+                self._search_navigate(1)
                 return
 
             ip = self.query_one(InteractionPanel)
@@ -1005,13 +1137,41 @@ class ToolBoxTUI(App):
             pass
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """搜索框输入变化时实时过滤菜单。"""
+        """搜索框输入变化时实时过滤。"""
         if event.input.id == "menu-search":
             try:
                 menu = self.query_one(ScriptMenu)
                 menu.filter(event.value)
             except Exception:
                 pass
+        elif event.input.id == "search-input":
+            query = event.value.strip()
+            if query:
+                self._search_query = query
+            else:
+                self._search_query = None
+            self._search_matches = []
+            self._search_current_idx = 0
+            self._rebuild_output()
+
+    def on_key(self, event: events.Key) -> None:
+        """搜索栏内的键盘导航。"""
+        try:
+            search_input = self.query_one("#search-input", Input)
+            if self.screen.focused != search_input:
+                return
+        except Exception:
+            return
+
+        if event.key == "up":
+            self._search_navigate(-1)
+            event.prevent_default()
+        elif event.key == "down":
+            self._search_navigate(1)
+            event.prevent_default()
+        elif event.key == "escape":
+            self._close_search()
+            event.prevent_default()
 
     # ── Event consumption (background task) ──────────────────────
 
